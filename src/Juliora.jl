@@ -50,47 +50,12 @@ module Juliora
 using Tidier
 using TidierFiles
 using LinearAlgebra
+using DataFrames
 
+include("seriesentry.jl")
 include("matrixentry.jl")
 
 
-"""
-	SeriesEntry
-
-A structure for storing a vector of numerical data with labeled indices,
-optimized for economic time series or cross-sectional data.
-
-# Fields
-- `data::Vector{Float64}`: The numerical vector data
-- `col_indices::DataFrame`: DataFrame containing labels and metadata for each element
-
-# Examples
-```jldoctest
-julia> using DataFrames
-
-julia> data = [100.0, 200.0, 150.0];
-
-julia> indices = DataFrame(Country=["USA", "CHN", "DEU"], Sector=["Total", "Total", "Total"]);
-
-julia> series = SeriesEntry(data, indices);
-
-julia> series.data
-3-element Vector{Float64}:
- 100.0
- 200.0
- 150.0
-
-julia> series.col_indices.Country
-3-element Vector{String}:
- "USA"
- "CHN"
- "DEU"
-```
-"""
-struct SeriesEntry
-	data::Vector{Float64}
-	col_indices::DataFrame
-end
 
 # Additional TidierData convenience methods
 
@@ -110,8 +75,8 @@ such as CO2 emissions, water use, land use, etc. The `F` matrix contains
 direct impacts while `A` contains impact intensities (impacts per dollar of output).
 """
 struct EnvironmentalExtension
-	A::MatrixEntry
 	F::MatrixEntry
+	A::MatrixEntry
 end
 
 """

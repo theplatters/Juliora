@@ -1,7 +1,9 @@
 using Juliora
 
-a = Juliora.Eora("data/2017/")
+a = Juliora.Eora("data/2017/");
 
-a.A[:,:]
+a.env.A[:, [(CountryCode = "AFG", Industry = "Industries", Sector = "Agriculture"), (CountryCode = "USA", Industry = "Industries", Sector = "Agriculture")]]
+
+a.env.A[:, (CountryCode = "USA", Sector = "Agriculture")]
 
 
