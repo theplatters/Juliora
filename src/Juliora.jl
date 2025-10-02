@@ -51,6 +51,7 @@ using Tidier
 using TidierFiles
 using LinearAlgebra
 using DataFrames
+using CSV
 
 include("seriesentry.jl")
 include("matrixentry.jl")
@@ -132,11 +133,8 @@ julia> size(env_ext.F.data)
 (3, 2)
 ```
 """
-function EnvironmentalExtension(path::String, x)
-	f = Matrix(read_csv(path * "Q.txt", col_names = false, delim = "\t"))
-	t_indices = @chain read_csv(path * "labels_T.txt", delim = "\t", col_names = false) begin
-		@select(CountryCode = Column2, Industry = Column3, Sector = Column4)
-	end
+function EnvironmentalExtension(path::String, x, t_indices)
+	f = CSV.read(path * "Q.txt", Tables.matrix, header=false)
 	f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
 		@select(Stressor = Column1, Source = Column2)
 	end
@@ -222,25 +220,32 @@ manufacturing_linkages = filter_rows(eora.A, row -> row.Sector == "Manufacturing
 ```
 """
 function Eora(path::String)
-	t = Matrix(read_csv(path * "T.txt", col_names = false, delim = "\t"))
-	t_indices = @chain read_csv(path * "labels_T.txt", delim = "\t", col_names = false) begin
+	# Parallel file reading using Threads.@spawn
+	t_task = Threads.@spawn CSV.read(path * "T.txt", Tables.matrix, header=false)
+	t_indices_task = Threads.@spawn @chain read_csv(path * "labels_T.txt", delim = "\t", col_names = false) begin
 		@select(CountryCode = Column2, Industry = Column3, Sector = Column4)
 	end
 
-
-	v = Matrix(read_csv(path * "VA.txt", col_names = false, delim = "\t"))
-	v_colnames = @chain read_csv(path * "labels_VA.txt", delim = "\t", col_names = false) begin
+	v_task = Threads.@spawn CSV.read(path * "VA.txt", Tables.matrix, header=false)
+	v_colnames_task = Threads.@spawn @chain read_csv(path * "labels_VA.txt", delim = "\t", col_names = false) begin
 		@select(PrimaryInput = Column2)
 	end
 
-	y = Matrix(read_csv(path * "FD.txt", col_names = false, delim = "\t"))
-	y_indices = @chain read_csv(path * "labels_FD.txt", delim = "\t", col_names = false) begin
+	y_task = Threads.@spawn CSV.read(path * "FD.txt", Tables.matrix, header=false)
+	y_indices_task = Threads.@spawn @chain read_csv(path * "labels_FD.txt", delim = "\t", col_names = false) begin
 		@select(CountryCode = Column2, Industry = Column3, Category = Column4)
 	end
 
+	# Wait for all tasks to complete
+	t = fetch(t_task)
+	t_indices = fetch(t_indices_task)
+	v = fetch(v_task)
+	v_colnames = fetch(v_colnames_task)
+	y = fetch(y_task)
+	y_indices = fetch(y_indices_task)
 
 	x = vec(sum(t, dims = 2) + sum(y, dims = 2))
-	a = t ./ replace(x, 0.0 => 1.0)
+	a = t ./replace(x, 0.0 => 1.0)
 
 	Eora(
 		MatrixEntry(a, t_indices, t_indices),
@@ -249,7 +254,7 @@ function Eora(path::String)
 		MatrixEntry(y, y_indices, t_indices),
 		MatrixEntry(inv(I - a), t_indices, t_indices),
 		SeriesEntry(x, t_indices),
-		EnvironmentalExtension(path, x),
+		EnvironmentalExtension(path, x, t_indices),
 	)
 end
 

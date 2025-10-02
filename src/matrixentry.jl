@@ -99,95 +99,95 @@ julia> matrix_entry[(Country="CHN", Sector="Man"), (Country="CHN", Sector="Man")
 ```
 """
 function Base.getindex(m::MatrixEntry, row_key::NamedTuple, col_key::NamedTuple)
-    row_idx = get(m.row_lookup, row_key, nothing)
-    col_idx = get(m.col_lookup, col_key, nothing)
+	row_idx = get(m.row_lookup, row_key, nothing)
+	col_idx = get(m.col_lookup, col_key, nothing)
 
-    isnothing(row_idx) && throw(BoundsError(m, row_key))
-    isnothing(col_idx) && throw(BoundsError(m, col_key))
+	isnothing(row_idx) && throw(BoundsError(m, row_key))
+	isnothing(col_idx) && throw(BoundsError(m, col_key))
 
-    return m.data[row_idx, col_idx]
+	return m.data[row_idx, col_idx]
 end
 
 function Base.getindex(m::MatrixEntry, row_key::NamedTuple, ::Colon)
-    # Find all rows that match the partial key
-    row_indices_set = Set{Int64}()
-    for (full_key, idx) in m.row_lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == row_key[k], keys(row_key))
-            push!(row_indices_set, idx)
-        end
-    end
-    
-    isempty(row_indices) && throw(BoundsError(m, row_key))
-    row_indices = collect(row_indices_set)    
-    if length(row_indices) == 1
-        return SeriesEntry(m.data[row_indices[1], :], m.col_indices)
-    else
-        return MatrixEntry(m.data[row_indices, :], m.col_indices, m.row_indices[row_indices, :])
-    end
+	# Find all rows that match the partial key
+	row_indices_set = Set{Int64}()
+	for (full_key, idx) in m.row_lookup
+		if all(k -> haskey(full_key, k) && full_key[k] == row_key[k], keys(row_key))
+			push!(row_indices_set, idx)
+		end
+	end
+
+	isempty(row_indices) && throw(BoundsError(m, row_key))
+	row_indices = collect(row_indices_set)
+	if length(row_indices) == 1
+		return SeriesEntry(m.data[row_indices[1], :], m.col_indices)
+	else
+		return MatrixEntry(m.data[row_indices, :], m.col_indices, m.row_indices[row_indices, :])
+	end
 end
 
 function Base.getindex(m::MatrixEntry, ::Colon, col_key::NamedTuple)
-    # Find all columns that match the partial key
-    col_indices_set = Set{Int64}()
-    for (full_key, idx) in m.col_lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == col_key[k], keys(col_key))
-            push!(col_indices_set, idx)
-        end
-    end
+	# Find all columns that match the partial key
+	col_indices_set = Set{Int64}()
+	for (full_key, idx) in m.col_lookup
+		if all(k -> haskey(full_key, k) && full_key[k] == col_key[k], keys(col_key))
+			push!(col_indices_set, idx)
+		end
+	end
 
-    isempty(col_indices_set) && throw(BoundsError(m, col_key))
+	isempty(col_indices_set) && throw(BoundsError(m, col_key))
 
-    col_indices = collect(col_indices_set)
-    if length(col_indices) == 1
-        return SeriesEntry(m.data[:, col_indices[1]], m.row_indices)
-    else
-        return MatrixEntry(m.data[:, col_indices], m.col_indices[col_indices, :], m.row_indices)
-    end
+	col_indices = collect(col_indices_set)
+	if length(col_indices) == 1
+		return SeriesEntry(m.data[:, col_indices[1]], m.row_indices)
+	else
+		return MatrixEntry(m.data[:, col_indices], m.col_indices[col_indices, :], m.row_indices)
+	end
 end
 
 function Base.getindex(m::MatrixEntry, ::Colon, col_key::AbstractArray{T}) where T <: NamedTuple
-    col_indices_set = Set{Int64}()
-    for key in col_key
-        for (full_key, idx) in m.col_lookup
-            if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
-                push!(col_indices_set, idx)
-            end
-        end
-    end
+	col_indices_set = Set{Int64}()
+	for key in col_key
+		for (full_key, idx) in m.col_lookup
+			if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
+				push!(col_indices_set, idx)
+			end
+		end
+	end
 
 
-    isempty(col_indices_set) && throw(BoundsError(m, col_key))
-    
-    col_indices = collect(col_indices_set)
-    if length(col_indices) == 1
-        return SeriesEntry(m.data[:, col_indices[1]], m.row_indices)
-    else
-        return MatrixEntry(m.data[:, col_indices], m.col_indices[col_indices, :], m.row_indices)
-    end
+	isempty(col_indices_set) && throw(BoundsError(m, col_key))
+
+	col_indices = collect(col_indices_set)
+	if length(col_indices) == 1
+		return SeriesEntry(m.data[:, col_indices[1]], m.row_indices)
+	else
+		return MatrixEntry(m.data[:, col_indices], m.col_indices[col_indices, :], m.row_indices)
+	end
 end
 
 function Base.getindex(m::MatrixEntry, row_key::AbstractArray{T}, ::Colon) where T <: NamedTuple
-    row_indices_set = Set{Int64}()
-    for key in row_key
-        for (full_key, idx) in m.row_lookup
-            if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
-                push!(row_indices_set, idx)
-            end
-        end
-    end
+	row_indices_set = Set{Int64}()
+	for key in row_key
+		for (full_key, idx) in m.row_lookup
+			if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
+				push!(row_indices_set, idx)
+			end
+		end
+	end
 
-    isempty(row_indices_set) && throw(BoundsError(m, row_key))
+	isempty(row_indices_set) && throw(BoundsError(m, row_key))
 
-    row_indices = collect(row_indices_set)
-    if length(row_indices) == 1
-        return SeriesEntry(m.data[row_indices[1], :], m.col_indices)
-    else
-        return MatrixEntry(m.data[row_indices, :], m.col_indices, m.row_indices[row_indices, :])
-    end
+	row_indices = collect(row_indices_set)
+	if length(row_indices) == 1
+		return SeriesEntry(m.data[row_indices[1], :], m.col_indices)
+	else
+		return MatrixEntry(m.data[row_indices, :], m.col_indices, m.row_indices[row_indices, :])
+	end
 end
 
 
-  
+
 
 """
 	Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
@@ -336,7 +336,7 @@ end
 # Boolean indexing with functions on row/column indices
 
 """
-    filter_rows(m::MatrixEntry, condition_func)
+	filter_rows(m::MatrixEntry, condition_func)
 
 Filter rows based on a condition function applied to row indices.
 
@@ -381,7 +381,7 @@ function filter_rows(m::MatrixEntry, condition_func)
 end
 
 """
-    filter_cols(m::MatrixEntry, condition_func)
+	filter_cols(m::MatrixEntry, condition_func)
 
 Filter columns based on a condition function applied to column indices.
 
@@ -419,14 +419,43 @@ function filter_cols(m::MatrixEntry, condition_func)
 	return m[:, col_mask]
 end
 
-function Base.filter(fun::Function, m::MatrixEntry, dims=1)
-    if dims > 2 || dims < 1 
-        throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
-    end
-    if dims == 1 ? filter_rows(m, fun) : filter_cols(m, fun)
-        return filter_rows(m, fun)
-    else
-        return filter_cols(m, fun)
-    end
+function Base.filter(fun::Function, m::MatrixEntry; dims::Int = 1)
+	if dims > 2 || dims < 1
+		throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+	end
+	if dims == 1
+		return filter_rows(m, fun)
+	else
+		return filter_cols(m, fun)
+	end
+end
+
+struct GroupedMatrixEntry
+	original::MatrixEntry
+	grouped::GroupedDataFrame
+	dims::Int
+	cols::Union{Symbol, Vector{Symbol}}
+end
+
+function groupby(m::MatrixEntry, cols; dims::Int = 1)
+	# Group row indices by the specified columns
+	grouped = DataFrames.groupby(m.row_indices, cols)
+
+	return GroupedMatrixEntry(m, grouped, dims, cols)
+end
+
+function aggregate(gm::GroupedMatrixEntry, func::Function)
+	ind = groupindices(gm.grouped)
+	groups = unique(ind)
+	if gm.dims == 1
+		new_data_matrix = reduce(vcat, [func(gm.original.data[ind .== g, :], dims = 1) for g in groups])
+		new_row_indices = unique(select(gm.original.row_indices, groupcols(gm.grouped)))
+		return MatrixEntry(new_data_matrix, gm.original.col_indices, new_row_indices)
+	else
+		new_data_matrix = reduce(hcat, [func(gm.original.data[:, ind .== g], dims = 2) for g in groups])
+		new_col_indices = unique(select(gm.original.col_indices, groupcols(gm.grouped)))
+
+		return MatrixEntry(new_data_matrix, new_col_indices, gm.original.row_indices)
+	end
 end
 
