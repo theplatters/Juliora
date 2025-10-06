@@ -94,24 +94,21 @@ function Eora(path::String)
 		@select(CountryCode = Column2, Industry = Column3, Category = Column4)
 	end
 
-	# Wait for all tasks to complete
-	t_matrix = fetch(t_task)
-	t_indices = fetch(t_indices_task)
 
-	t = @chain MatrixEntry(t_matrix, t_indices, t_indices) begin
-		drop(_, (CountryCode = "ROW",); dims = 1)
-		drop(_, (CountryCode = "ROW",); dims = 2)
-	end
+	t_indices = fetch(t_indices_task)
+	t_matrix = fetch(t_task)
+
+	t = MatrixEntry(t_matrix, copy(t_indices), copy(t_indices))
+
+	drop!(t, (CountryCode = "ROW",); dims = 1)
+	drop!(t, (CountryCode = "ROW",); dims = 2)
 
 
 
 	y_indices = fetch(y_indices_task)
-	y = @chain y_task begin
-		fetch(_)
-		MatrixEntry(_, y_indices, t_indices)
-		drop(_, (CountryCode = "ROW",); dims = 1)
-		drop(_, (CountryCode = "ROW",); dims = 2)
-	end
+	y = MatrixEntry(fetch(y_task), y_indices, copy(t_indices))
+	drop!(y, (CountryCode = "ROW",); dims = 1)
+	drop!(y, (CountryCode = "ROW",); dims = 2)
 	x = calculate_total_output(t.data, y.data)
 	a = calculate_technical_coefficients(t, x)
 	l = calculate_leontief_factorization(a)

@@ -76,9 +76,8 @@ function EnvironmentalExtension(path::String, x, t_indices)
 	f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
 		@select(Stressor = Column1, Source = Column2)
 	end
-	f = @chain MatrixEntry(f_data, t_indices, f_indices) begin
-		drop(_, (CountryCode = "ROW",); dims = 2)
-	end
+	f = MatrixEntry(f_data, t_indices, f_indices)
+	drop!(f, (CountryCode = "ROW",); dims = 2)
 
 	EnvironmentalExtension(f, calculate_technical_coefficients(f, x))
 end

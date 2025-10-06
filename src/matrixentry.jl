@@ -48,7 +48,7 @@ julia> matrix_entry.row_indices.Country
  "DEU"
 ```
 """
-struct MatrixEntry <: AbstractMatrixEntry
+mutable struct MatrixEntry <: AbstractMatrixEntry
 	data::Matrix{Float64}
 	col_indices::DataFrame
 	row_indices::DataFrame
@@ -522,20 +522,20 @@ function drop!(m::MatrixEntry, indices::T; dims = 1) where T <: NamedTuple
         m.data = m.data[indices_to_keep, :]
         deleteat!(m.row_indices, .!indices_to_keep)
         
-        # Rebuild row lookup with new indices
-        empty!(m.row_lookup)
-        for (i, row) in enumerate(eachrow(m.row_indices))
-            m.row_lookup[NamedTuple(row)] = i
+        # Rebuild column lookup with new indices
+        empty!(m.col_lookup)
+        for (i, row) in enumerate(eachrow(m.col_indices))
+            m.col_lookup[NamedTuple(row)] = i
         end
     else
         # Drop columns
         m.data = m.data[:, indices_to_keep]
         deleteat!(m.col_indices, .!indices_to_keep)
         
-        # Rebuild column lookup with new indices
-        empty!(m.col_lookup)
-        for (i, row) in enumerate(eachrow(m.col_indices))
-            m.col_lookup[NamedTuple(row)] = i
+        # Rebuild row lookup with new indices
+        empty!(m.row_lookup)
+        for (i, row) in enumerate(eachrow(m.row_indices))
+            m.row_lookup[NamedTuple(row)] = i
         end
     end
 
