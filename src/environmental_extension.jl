@@ -71,13 +71,12 @@ julia> size(env_ext.F.data)
 (3, 2)
 ```
 """
-function EnvironmentalExtension(path::String, x, t_indices)
+function EnvironmentalExtension(path::String, x, t_indices, row_mask)
 	f_data = CSV.read(path * "Q.txt", Tables.matrix, header = false)
 	f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
 		@select(Stressor = Column1, Source = Column2)
 	end
-	f = MatrixEntry(f_data, t_indices, f_indices)
-	drop!(f, (CountryCode = "ROW",); dims = 2)
+	f = MatrixEntry(f_data[:,row_mask], t_indices, f_indices)
 
 	EnvironmentalExtension(f, calculate_technical_coefficients(f, x))
 end

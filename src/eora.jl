@@ -98,17 +98,17 @@ function Eora(path::String)
 	t_indices = fetch(t_indices_task)
 	t_matrix = fetch(t_task)
 
-	t = MatrixEntry(t_matrix, copy(t_indices), copy(t_indices))
-
-	drop!(t, (CountryCode = "ROW",); dims = 1)
-	drop!(t, (CountryCode = "ROW",); dims = 2)
+	row_mask = t_indices.CountryCode .!= "ROW"
+	t_indices_clean = t_indices[row_mask, :]
+	t = MatrixEntry(t_matrix[row_mask, row_mask], t_indices_clean, t_indices_clean)
 
 
 
 	y_indices = fetch(y_indices_task)
-	y = MatrixEntry(fetch(y_task), y_indices, copy(t_indices))
-	drop!(y, (CountryCode = "ROW",); dims = 1)
-	drop!(y, (CountryCode = "ROW",); dims = 2)
+
+	y_mask = y_indices.CountryCode .!= "ROW"
+	y_indices_clean = y_indices[y_mask, :]
+	y = MatrixEntry(fetch(y_task)[row_mask, y_mask], y_indices_clean, t_indices_clean)
 	x = calculate_total_output(t.data, y.data)
 	a = calculate_technical_coefficients(t, x)
 	l = calculate_leontief_factorization(a)
@@ -118,11 +118,11 @@ function Eora(path::String)
 	Eora(
 		a,
 		t,
-		MatrixEntry(v, t_indices, v_colnames),
+		MatrixEntry(v[:, row_mask], t_indices_clean, v_colnames),
 		y,
 		l,
-		SeriesEntry(x, filter(row -> row.CountryCode != "ROW", t_indices)),
-		EnvironmentalExtension(path, x, t_indices),
+		SeriesEntry(x, t_indices_clean),
+		EnvironmentalExtension(path, x, t_indices_clean, row_mask),
 	)
 end
 
