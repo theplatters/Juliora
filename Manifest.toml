@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-rc3"
 manifest_format = "2.0"
-project_hash = "26c2be97b319dab55d9125614b5b8e3bcba2b829"
+project_hash = "27f07a277d39dc4bd38e1e8cbe9735fdb849387b"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -200,6 +200,12 @@ version = "1.3.2"
 git-tree-sha1 = "aebf55e6d7795e02ca500a689d326ac979aaf89e"
 uuid = "9718e550-a3fa-408a-8086-8db961cd8217"
 version = "0.1.1"
+
+[[deps.BenchmarkTools]]
+deps = ["Compat", "JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "e38fbc49a620f5d0b660d7f543db1009fe0f8336"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.6.0"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "0691e34b3bb8be9307330f88d1a3c3f25466c24d"
@@ -1207,7 +1213,7 @@ uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
 
 [[deps.Juliora]]
-deps = ["DataFrames", "LinearAlgebra", "Test", "Tidier", "TidierData", "TidierFiles"]
+deps = ["CSV", "DataFrames", "LinearAlgebra", "Test", "Tidier", "TidierData", "TidierFiles"]
 path = "."
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
 version = "0.1.0"
@@ -1756,6 +1762,11 @@ version = "2.4.0"
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.Profile]]
+deps = ["StyledStrings"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 version = "1.11.0"
 
 [[deps.ProgressMeter]]

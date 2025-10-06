@@ -1,16 +1,15 @@
 using Juliora
-using DataFrames
-using CSV
-using TidierFiles
+using BenchmarkTools
+using Profile
+Juliora.Eora("data/2017/")
 
-a = Juliora.Eora("data/2017/");
-a
+@profview Juliora.Eora("data/2017/")
+norm(a.A.data)
 
-Base.summarysize(a)
 ag = Juliora.groupby(a.A, [:Sector], dims = 2)
+count(sum(a.A.data, dims = 2) .> 1.0)
 
+a.T
+
+Juliora.drop(a.FD,(CountryCode="ROW", ); dims=2)
 Juliora.aggregate(ag, sum)
-file
-
-@time CSV.read("data/2017/FD.txt", Tables.matrix, header=false)
-@time Matrix(read_csv("data/2017/FD.txt", col_names = false, delim = "\t"))

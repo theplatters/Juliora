@@ -1,3 +1,4 @@
+abstract type AbstractMatrixEntry end
 """
 	MatrixEntry
 
@@ -47,7 +48,7 @@ julia> matrix_entry.row_indices.Country
  "DEU"
 ```
 """
-struct MatrixEntry
+struct MatrixEntry <: AbstractMatrixEntry
 	data::Matrix{Float64}
 	col_indices::DataFrame
 	row_indices::DataFrame
@@ -98,7 +99,7 @@ julia> matrix_entry[(Country="CHN", Sector="Man"), (Country="CHN", Sector="Man")
 4.0
 ```
 """
-function Base.getindex(m::MatrixEntry, row_key::NamedTuple, col_key::NamedTuple)
+function Base.getindex(m::AbstractMatrixEntry, row_key::NamedTuple, col_key::NamedTuple)
 	row_idx = get(m.row_lookup, row_key, nothing)
 	col_idx = get(m.col_lookup, col_key, nothing)
 
@@ -108,7 +109,7 @@ function Base.getindex(m::MatrixEntry, row_key::NamedTuple, col_key::NamedTuple)
 	return m.data[row_idx, col_idx]
 end
 
-function Base.getindex(m::MatrixEntry, row_key::NamedTuple, ::Colon)
+function Base.getindex(m::AbstractMatrixEntry, row_key::NamedTuple, ::Colon)
 	# Find all rows that match the partial key
 	row_indices_set = Set{Int64}()
 	for (full_key, idx) in m.row_lookup
@@ -126,7 +127,7 @@ function Base.getindex(m::MatrixEntry, row_key::NamedTuple, ::Colon)
 	end
 end
 
-function Base.getindex(m::MatrixEntry, ::Colon, col_key::NamedTuple)
+function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_key::NamedTuple)
 	# Find all columns that match the partial key
 	col_indices_set = Set{Int64}()
 	for (full_key, idx) in m.col_lookup
@@ -145,7 +146,7 @@ function Base.getindex(m::MatrixEntry, ::Colon, col_key::NamedTuple)
 	end
 end
 
-function Base.getindex(m::MatrixEntry, ::Colon, col_key::AbstractArray{T}) where T <: NamedTuple
+function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_key::AbstractArray{T}) where T <: NamedTuple
 	col_indices_set = Set{Int64}()
 	for key in col_key
 		for (full_key, idx) in m.col_lookup
@@ -166,7 +167,7 @@ function Base.getindex(m::MatrixEntry, ::Colon, col_key::AbstractArray{T}) where
 	end
 end
 
-function Base.getindex(m::MatrixEntry, row_key::AbstractArray{T}, ::Colon) where T <: NamedTuple
+function Base.getindex(m::AbstractMatrixEntry, row_key::AbstractArray{T}, ::Colon) where T <: NamedTuple
 	row_indices_set = Set{Int64}()
 	for key in row_key
 		for (full_key, idx) in m.row_lookup
@@ -190,7 +191,7 @@ end
 
 
 """
-	Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
+	Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
 
 Filter both rows and columns using boolean masks, returning a new MatrixEntry.
 
@@ -227,7 +228,7 @@ julia> filtered.data[1, 1]
 1.0
 ```
 """
-function Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
+function Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
 	@assert length(row_mask) == size(m.data, 1) "Row mask length must match number of rows"
 	@assert length(col_mask) == size(m.data, 2) "Column mask length must match number of columns"
 
@@ -239,12 +240,12 @@ function Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, col_mask:
 end
 
 """
-	Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, ::Colon)
+	Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, ::Colon)
 
 Filter rows using a boolean mask while keeping all columns.
 
 # Arguments
-- `m::MatrixEntry`: The matrix entry to filter
+- `m::AbstractMatrixEntry`: The matrix entry to filter
 - `row_mask::AbstractVector{Bool}`: Boolean vector for row selection
 - `::Colon`: Indicates all columns should be kept
 
@@ -278,7 +279,7 @@ julia> developed_data.row_indices.Country
  "DEU"
 ```
 """
-function Base.getindex(m::MatrixEntry, row_mask::AbstractVector{Bool}, ::Colon)
+function Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, ::Colon)
 	@assert length(row_mask) == size(m.data, 1) "Row mask length must match number of rows"
 
 	new_data = m.data[row_mask, :]
@@ -324,7 +325,7 @@ julia> usa_data.col_indices.Country
  "USA"
 ```
 """
-function Base.getindex(m::MatrixEntry, ::Colon, col_mask::AbstractVector{Bool})
+function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_mask::AbstractVector{Bool})
 	@assert length(col_mask) == size(m.data, 2) "Column mask length must match number of columns"
 
 	new_data = m.data[:, col_mask]
@@ -336,12 +337,12 @@ end
 # Boolean indexing with functions on row/column indices
 
 """
-	filter_rows(m::MatrixEntry, condition_func)
+	filter_rows(m::AbstractMatrixEntry, condition_func)
 
 Filter rows based on a condition function applied to row indices.
 
 # Arguments
-- `m::MatrixEntry`: The matrix entry to filter
+- `m::AbstractMatrixEntry`: The matrix entry to filter
 - `condition_func`: Function that takes a NamedTuple (row) and returns Bool
 
 # Returns
@@ -375,7 +376,7 @@ julia> size(manufacturing.data)
 (1, 2)
 ```
 """
-function filter_rows(m::MatrixEntry, condition_func)
+function filter_rows(m::AbstractMatrixEntry, condition_func)
 	row_mask = [condition_func(NamedTuple(row)) for row in eachrow(m.row_indices)]
 	return m[row_mask, :]
 end
@@ -414,7 +415,7 @@ julia> china_cols.col_indices.Country
  "CHN"
 ```
 """
-function filter_cols(m::MatrixEntry, condition_func)
+function filter_cols(m::AbstractMatrixEntry, condition_func)
 	col_mask = [condition_func(NamedTuple(row)) for row in eachrow(m.col_indices)]
 	return m[:, col_mask]
 end
@@ -430,7 +431,7 @@ function Base.filter(fun::Function, m::MatrixEntry; dims::Int = 1)
 	end
 end
 
-struct GroupedMatrixEntry
+struct GroupedMatrixEntry <: AbstractMatrixEntry
 	original::MatrixEntry
 	grouped::GroupedDataFrame
 	dims::Int
@@ -459,3 +460,84 @@ function aggregate(gm::GroupedMatrixEntry, func::Function)
 	end
 end
 
+function drop(m::MatrixEntry, indices::T; dims = 1) where T <: NamedTuple
+	if dims < 1 || dims > 2
+		throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+	end
+
+	indices_set = trues(size(m.data, dims))
+
+	lookup = dims == 1 ? m.row_lookup : m.col_lookup
+	for (full_key, idx) in lookup
+		if all(k -> haskey(full_key, k) && full_key[k] == indices[k], keys(indices))
+			indices_set[idx] = false
+		end
+	end
+
+	dims == 1 && return m[indices_set, :]
+	dims == 2 && return m[:, indices_set]
+end
+
+
+function drop(m::MatrixEntry, row_key::AbstractArray{T}; dims = 1) where T <: NamedTuple
+	if dims < 1 || dims > 2
+		throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+	end
+
+	indices_set = trues(size(m.data, dims))
+
+	lookup = dims == 1 ? m.row_lookup : m.col_lookup
+	for (i, key) in enumerate(row_key)
+		for (full_key, idx) in lookup
+			if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
+				indices_set[idx] = false
+			end
+		end
+	end
+
+	dims == 1 && return m[indices_set, :]
+	dims == 2 && return m[:, indices_set]
+
+end
+function drop!(m::MatrixEntry, indices::T; dims = 1) where T <: NamedTuple
+    if dims < 1 || dims > 2
+        throw(BoundsError("Dimension not supported, dims should either be 1 or 2, $dims was given"))
+    end
+
+    # Find indices to keep (opposite of drop)
+    indices_to_keep = trues(size(m.data, dims))
+
+    lookup = dims == 1 ? m.row_lookup : m.col_lookup
+    indices_to_remove = Int[]
+    
+    for (full_key, idx) in lookup
+        if all(k -> haskey(full_key, k) && full_key[k] == indices[k], keys(indices))
+            indices_to_keep[idx] = false
+            push!(indices_to_remove, idx)
+        end
+    end
+
+    if dims == 1
+        # Drop rows
+        m.data = m.data[indices_to_keep, :]
+        deleteat!(m.row_indices, .!indices_to_keep)
+        
+        # Rebuild row lookup with new indices
+        empty!(m.row_lookup)
+        for (i, row) in enumerate(eachrow(m.row_indices))
+            m.row_lookup[NamedTuple(row)] = i
+        end
+    else
+        # Drop columns
+        m.data = m.data[:, indices_to_keep]
+        deleteat!(m.col_indices, .!indices_to_keep)
+        
+        # Rebuild column lookup with new indices
+        empty!(m.col_lookup)
+        for (i, row) in enumerate(eachrow(m.col_indices))
+            m.col_lookup[NamedTuple(row)] = i
+        end
+    end
+
+    return m
+end
