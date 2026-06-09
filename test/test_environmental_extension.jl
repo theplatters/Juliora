@@ -143,7 +143,6 @@ function test_environmental_extension()
         env_ext = EnvironmentalExtension(a_matrix, f_matrix)
         
         # Test total impacts by stressor
-        using Tidier
         
         stressor_totals = env_ext.F |> df -> @chain df begin
             @group_by(row_Stressor)

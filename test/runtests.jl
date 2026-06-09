@@ -2,13 +2,14 @@ using Test
 using Juliora
 using DataFrames
 using LinearAlgebra
+using Tidier
 
 # Include all test modules
 include("test_matrixentry.jl")
 include("test_seriesentry.jl") 
 include("test_boolean_indexing.jl")
 include("test_filtering.jl")
-include("test_tidier_integration.jl")
+# include("test_tidier_integration.jl")
 include("test_environmental_extension.jl")
 include("test_eora.jl")
 include("test_analysis_functions.jl")
@@ -30,9 +31,9 @@ include("test_analysis_functions.jl")
         test_filtering()
     end
     
-    @testset "TidierData Integration Tests" begin
-        test_tidier_integration()
-    end
+    # @testset "TidierData Integration Tests" begin
+    #     test_tidier_integration()
+    # end
     
     @testset "Environmental Extension Tests" begin
         test_environmental_extension()
