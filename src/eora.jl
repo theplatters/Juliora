@@ -136,3 +136,45 @@ function calculate_total_output(t_data, y_data)
 	end
 	return x
 end
+
+function Eora(; Z::MatrixEntry, Y::MatrixEntry, VA::MatrixEntry)
+	if size(Z.data, 1) == size(Z.data, 2)
+		x = calculate_total_output(Z.data, Y.data)
+		a = calculate_technical_coefficients(Z, x)
+		l = calculate_leontief_factorization(a)
+		dummy_env = EnvironmentalExtension(Z, a)
+		return Eora(
+			a,
+			Z,
+			VA,
+			Y,
+			l,
+			SeriesEntry(x, Z.row_indices),
+			dummy_env
+		)
+	else
+		x = zeros(size(Z.data, 2))
+		a = calculate_technical_coefficients(Z, x)
+		l = LeontiefFactorization(lu(Matrix{Float64}(I, 1, 1)), Z.col_indices, Z.row_indices)
+		dummy_env = EnvironmentalExtension(Z, a)
+		return Eora(
+			a,
+			Z,
+			VA,
+			Y,
+			l,
+			SeriesEntry(x, Z.col_indices),
+			dummy_env
+		)
+	end
+end
+
+function Base.getproperty(eora::Eora, sym::Symbol)
+	if sym === :Z
+		return getfield(eora, :T)
+	elseif sym === :Y
+		return getfield(eora, :FD)
+	else
+		return getfield(eora, sym)
+	end
+end

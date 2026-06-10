@@ -1,7 +1,108 @@
-using Test
-using DataFrames
-include("../src/Juliora.jl")
-using .Juliora
+# Helper function for Eora filtering
+function filter_eora(eora::Eora; 
+                     row_countries=nothing, col_countries=nothing,
+                     row_industries=nothing, col_industries=nothing,
+                     row_regions=nothing, col_regions=nothing,
+                     final_demand_countries=nothing,
+                     row_filter=nothing, col_filter=nothing)
+    
+    # Start with all indices
+    row_mask = trues(size(eora.Z.data, 1))
+    col_mask = trues(size(eora.Z.data, 2))
+    fd_mask = trues(size(eora.Y.data, 2))
+    
+    # Apply country filters
+    if row_countries !== nothing
+        row_mask .&= [r.CountryCode in row_countries for r in eachrow(eora.Z.row_indices)]
+    end
+    if col_countries !== nothing
+        col_mask .&= [c.CountryCode in col_countries for c in eachrow(eora.Z.col_indices)]
+    end
+    
+    # Apply industry filters  
+    if row_industries !== nothing
+        row_mask .&= [r.Industry in row_industries for r in eachrow(eora.Z.row_indices)]
+    end
+    if col_industries !== nothing
+        col_mask .&= [c.Industry in col_industries for c in eachrow(eora.Z.col_indices)]
+    end
+    
+    # Apply region filters
+    if row_regions !== nothing
+        row_mask .&= [r.Region in row_regions for r in eachrow(eora.Z.row_indices)]
+    end
+    if col_regions !== nothing
+        col_mask .&= [c.Region in col_regions for c in eachrow(eora.Z.col_indices)]
+    end
+    
+    # Apply custom filters
+    if row_filter !== nothing
+        row_mask .&= [row_filter(r) for r in eachrow(eora.Z.row_indices)]
+    end
+    if col_filter !== nothing
+        col_mask .&= [col_filter(c) for c in eachrow(eora.Z.col_indices)]
+    end
+    
+    # Apply final demand filter
+    if final_demand_countries !== nothing
+        fd_mask .&= [fd.CountryCode in final_demand_countries for fd in eachrow(eora.Y.col_indices)]
+    end
+    
+    # Create filtered matrices
+    filtered_Z = IO.Matrixentry(
+        eora.Z.data[row_mask, col_mask],
+        eora.Z.col_indices[col_mask, :],
+        eora.Z.row_indices[row_mask, :]
+    )
+    
+    filtered_Y = IO.Matrixentry(
+        eora.Y.data[row_mask, fd_mask],
+        eora.Y.col_indices[fd_mask, :],
+        eora.Y.row_indices[row_mask, :]
+    )
+    
+    filtered_VA = IO.Matrixentry(
+        eora.VA.data[:, row_mask],
+        eora.VA.col_indices[row_mask, :],
+        eora.VA.row_indices
+    )
+    
+    return Eora(Z=filtered_Z, Y=filtered_Y, VA=filtered_VA)
+end
+
+# Analysis functions
+function calculate_total_output(eora::Eora)
+    intermediate_demand = sum(eora.Z.data, dims=2)
+    final_demand = sum(eora.Y.data, dims=2)
+    total_output = vec(intermediate_demand + final_demand)
+    
+    return SeriesEntry(total_output, eora.Z.row_indices)
+end
+
+function calculate_technical_coefficients(eora::Eora)
+    total_output = calculate_total_output(eora)
+    # Avoid division by zero
+    X_safe = max.(total_output.data, 1e-10)
+    A_data = eora.Z.data ./ X_safe'  # Broadcasting division
+    
+    return IO.Matrixentry(A_data, eora.Z.col_indices, eora.Z.row_indices)
+end
+
+function calculate_leontief_inverse(eora::Eora)
+    A = calculate_technical_coefficients(eora)
+    n = size(A.data, 1)
+    I_matrix = Matrix{Float64}(LinearAlgebra.I, n, n)
+    L_data = inv(I_matrix - A.data)
+    
+    return IO.Matrixentry(L_data, eora.Z.col_indices, eora.Z.row_indices)
+end
+
+function calculate_multipliers(eora::Eora)
+    L = calculate_leontief_inverse(eora)
+    multipliers = vec(sum(L.data, dims=1))
+    
+    return SeriesEntry(multipliers, eora.Z.col_indices)
+end
 
 @testset "Eora MRIO Tests" begin
     
@@ -27,7 +128,6 @@ using .Juliora
         row_df = DataFrame()
         row_df.CountryCode = repeat(countries, n_industries)
         row_df.Industry = repeat(industries, outer = n_countries)
-        row_df.Sector = [string(c, "_", i) for c in row_df.CountryCode, i in row_df.Industry]
         row_df.Sector = [row_df.CountryCode[i] * "_" * row_df.Industry[i] for i in 1:nrow(row_df)]
         
         # Create column indices (demanding sectors) - same structure as rows for Z matrix
@@ -44,15 +144,15 @@ using .Juliora
         
         # Test Eora construction
         eora = Eora(
-            Z = MatrixEntry(Z_data, col_df, row_df),
-            Y = MatrixEntry(Y_data, Y_col_df, row_df),
-            VA = MatrixEntry(VA_data, row_df, VA_row_df)
+            Z = IO.Matrixentry(Z_data, col_df, row_df),
+            Y = IO.Matrixentry(Y_data, Y_col_df, row_df),
+            VA = IO.Matrixentry(VA_data, row_df, VA_row_df)
         )
         
         @test isa(eora, Eora)
-        @test isa(eora.Z, MatrixEntry)
-        @test isa(eora.Y, MatrixEntry)
-        @test isa(eora.VA, MatrixEntry)
+        @test isa(eora.Z, IO.Matrixentry)
+        @test isa(eora.Y, IO.Matrixentry)
+        @test isa(eora.VA, IO.Matrixentry)
         
         # Test dimensions are consistent
         @test size(eora.Z.data, 1) == size(eora.Z.data, 2) == n_total  # Z is square
@@ -105,9 +205,9 @@ using .Juliora
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
         
         eora = Eora(
-            Z = MatrixEntry(Z_data, col_df, row_df),
-            Y = MatrixEntry(Y_data, Y_col_df, row_df),
-            VA = MatrixEntry(VA_data, row_df, VA_row_df)
+            Z = IO.Matrixentry(Z_data, col_df, row_df),
+            Y = IO.Matrixentry(Y_data, Y_col_df, row_df),
+            VA = IO.Matrixentry(VA_data, row_df, VA_row_df)
         )
         
         # Test basic accounting identity: X = Z * 1 + Y * 1 (total output)
@@ -133,7 +233,7 @@ using .Juliora
         industries = ["Agr", "Man"]
         
         row_df = DataFrame(
-            CountryCode = repeat(countries, 2),
+            CountryCode = repeat(countries, inner=2),
             Industry = repeat(industries, outer=2)
         )
         col_df = copy(row_df)
@@ -150,9 +250,9 @@ using .Juliora
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
         
         eora = Eora(
-            Z = MatrixEntry(Z_data, col_df, row_df),
-            Y = MatrixEntry(Y_data, Y_col_df, row_df),
-            VA = MatrixEntry(VA_data, row_df, VA_row_df)
+            Z = IO.Matrixentry(Z_data, col_df, row_df),
+            Y = IO.Matrixentry(Y_data, Y_col_df, row_df),
+            VA = IO.Matrixentry(VA_data, row_df, VA_row_df)
         )
         
         # Test Z matrix indexing
@@ -185,13 +285,13 @@ using .Juliora
         # Test boolean indexing
         usa_sectors = eora.Z.row_indices.CountryCode .== "USA"
         usa_z_data = eora.Z[usa_sectors, :]
-        @test size(usa_z_data, 1) == 2  # 2 USA sectors
-        @test size(usa_z_data, 2) == 4  # All 4 sectors as columns
+        @test size(usa_z_data.data, 1) == 2  # 2 USA sectors
+        @test size(usa_z_data.data, 2) == 4  # All 4 sectors as columns
         
         # Test country-level aggregation
         usa_final_demand = eora.Y[:, eora.Y.col_indices.CountryCode .== "USA"]
-        @test size(usa_final_demand) == (4, 1)  # All sectors, USA demand only
-        @test usa_final_demand[1, 1] == 100.0  # USA_Agr -> USA demand
+        @test size(usa_final_demand.data) == (4, 1)  # All sectors, USA demand only
+        @test usa_final_demand.data[1, 1] == 100.0  # USA_Agr -> USA demand
     end
     
     @testset "Filtering Operations" begin
@@ -217,9 +317,9 @@ using .Juliora
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
         
         eora = Eora(
-            Z = MatrixEntry(Z_data, col_df, row_df),
-            Y = MatrixEntry(Y_data, Y_col_df, row_df),
-            VA = MatrixEntry(VA_data, row_df, VA_row_df)
+            Z = IO.Matrixentry(Z_data, col_df, row_df),
+            Y = IO.Matrixentry(Y_data, Y_col_df, row_df),
+            VA = IO.Matrixentry(VA_data, row_df, VA_row_df)
         )
         
         # Test filtering by country
@@ -262,7 +362,7 @@ using .Juliora
         industries = ["Agr", "Man"]
         
         row_df = DataFrame(
-            CountryCode = repeat(countries, 2),
+            CountryCode = repeat(countries, inner=2),
             Industry = repeat(industries, outer=2)
         )
         col_df = copy(row_df)
@@ -280,9 +380,9 @@ using .Juliora
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
         
         eora = Eora(
-            Z = MatrixEntry(Z_data, col_df, row_df),
-            Y = MatrixEntry(Y_data, Y_col_df, row_df),
-            VA = MatrixEntry(VA_data, row_df, VA_row_df)
+            Z = IO.Matrixentry(Z_data, col_df, row_df),
+            Y = IO.Matrixentry(Y_data, Y_col_df, row_df),
+            VA = IO.Matrixentry(VA_data, row_df, VA_row_df)
         )
         
         # Test total output calculation
@@ -297,7 +397,7 @@ using .Juliora
         
         # Test technical coefficients calculation
         tech_coeffs = calculate_technical_coefficients(eora)
-        @test isa(tech_coeffs, MatrixEntry)
+        @test isa(tech_coeffs, IO.Matrixentry)
         @test size(tech_coeffs.data) == size(Z_data)
         
         # Technical coefficients should be Z / X (column-wise division)
@@ -307,7 +407,7 @@ using .Juliora
         
         # Test Leontief inverse calculation
         leontief = calculate_leontief_inverse(eora)
-        @test isa(leontief, MatrixEntry)
+        @test isa(leontief, IO.Matrixentry)
         @test size(leontief.data) == size(Z_data)
         
         # Leontief inverse should be (I - A)^(-1)
@@ -325,110 +425,4 @@ using .Juliora
         expected_mult = vec(sum(leontief.data, dims=1))
         @test multipliers.data ≈ expected_mult rtol=1e-10
     end
-end
-
-# Helper function for Eora filtering (would be in main module)
-function filter_eora(eora::Eora; 
-                     row_countries=nothing, col_countries=nothing,
-                     row_industries=nothing, col_industries=nothing,
-                     row_regions=nothing, col_regions=nothing,
-                     final_demand_countries=nothing,
-                     row_filter=nothing, col_filter=nothing)
-    
-    # Start with all indices
-    row_mask = trues(size(eora.Z.data, 1))
-    col_mask = trues(size(eora.Z.data, 2))
-    fd_mask = trues(size(eora.Y.data, 2))
-    
-    # Apply country filters
-    if row_countries !== nothing
-        row_mask .&= [r.CountryCode in row_countries for r in eachrow(eora.Z.row_indices)]
-    end
-    if col_countries !== nothing
-        col_mask .&= [c.CountryCode in col_countries for c in eachrow(eora.Z.col_indices)]
-    end
-    
-    # Apply industry filters  
-    if row_industries !== nothing
-        row_mask .&= [r.Industry in row_industries for r in eachrow(eora.Z.row_indices)]
-    end
-    if col_industries !== nothing
-        col_mask .&= [c.Industry in col_industries for c in eachrow(eora.Z.col_indices)]
-    end
-    
-    # Apply region filters
-    if row_regions !== nothing
-        row_mask .&= [r.Region in row_regions for r in eachrow(eora.Z.row_indices)]
-    end
-    if col_regions !== nothing
-        col_mask .&= [c.Region in col_regions for c in eachrow(eora.Z.col_indices)]
-    end
-    
-    # Apply custom filters
-    if row_filter !== nothing
-        row_mask .&= [row_filter(r) for r in eachrow(eora.Z.row_indices)]
-    end
-    if col_filter !== nothing
-        col_mask .&= [col_filter(c) for c in eachrow(eora.Z.col_indices)]
-    end
-    
-    # Apply final demand filter
-    if final_demand_countries !== nothing
-        fd_mask .&= [fd.CountryCode in final_demand_countries for fd in eachrow(eora.Y.col_indices)]
-    end
-    
-    # Create filtered matrices
-    filtered_Z = MatrixEntry(
-        eora.Z.data[row_mask, col_mask],
-        eora.Z.col_indices[col_mask, :],
-        eora.Z.row_indices[row_mask, :]
-    )
-    
-    filtered_Y = MatrixEntry(
-        eora.Y.data[row_mask, fd_mask],
-        eora.Y.col_indices[fd_mask, :],
-        eora.Y.row_indices[row_mask, :]
-    )
-    
-    filtered_VA = MatrixEntry(
-        eora.VA.data[:, row_mask],
-        eora.VA.col_indices[row_mask, :],
-        eora.VA.row_indices
-    )
-    
-    return Eora(Z=filtered_Z, Y=filtered_Y, VA=filtered_VA)
-end
-
-# Analysis functions (would be in main module)
-function calculate_total_output(eora::Eora)
-    intermediate_demand = sum(eora.Z.data, dims=2)
-    final_demand = sum(eora.Y.data, dims=2)
-    total_output = vec(intermediate_demand + final_demand)
-    
-    return SeriesEntry(total_output, eora.Z.row_indices, "TotalOutput")
-end
-
-function calculate_technical_coefficients(eora::Eora)
-    total_output = calculate_total_output(eora)
-    # Avoid division by zero
-    X_safe = max.(total_output.data, 1e-10)
-    A_data = eora.Z.data ./ X_safe'  # Broadcasting division
-    
-    return MatrixEntry(A_data, eora.Z.col_indices, eora.Z.row_indices)
-end
-
-function calculate_leontief_inverse(eora::Eora)
-    A = calculate_technical_coefficients(eora)
-    n = size(A.data, 1)
-    I_matrix = Matrix{Float64}(LinearAlgebra.I, n, n)
-    L_data = inv(I_matrix - A.data)
-    
-    return MatrixEntry(L_data, eora.Z.col_indices, eora.Z.row_indices)
-end
-
-function calculate_multipliers(eora::Eora)
-    L = calculate_leontief_inverse(eora)
-    multipliers = vec(sum(L.data, dims=1))
-    
-    return SeriesEntry(multipliers, eora.Z.col_indices, "OutputMultiplier")
 end

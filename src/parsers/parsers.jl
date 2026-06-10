@@ -58,12 +58,12 @@ function find_row_starts(raw_bytes::Vector{UInt8})
 end
 
 """
-    custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols::Int)
+    custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols::Int; delim::Char = ',')
 
 Streams line-by-line using byte tokens and directly compiles a SparseMatrixCSC.
 Bypasses intermediate dense grid allocations completely.
 """
-function custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols::Int)
+function custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols::Int; delim::Char = ',')
     # Coordinate collection vectors for sparse matrix generation
     I = Int[]
     J = Int[]
@@ -79,7 +79,8 @@ function custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols
     row_starts = find_row_starts(raw_bytes)
     actual_rows = min(nrows, length(row_starts))
 
-    opts = Parsers.Options()
+    opts = Parsers.Options(delim=delim)
+    delim_byte = UInt8(delim)
 
     for i in 1:actual_rows
         pos = row_starts[i]
@@ -87,7 +88,7 @@ function custom_gloria_sparse_parser(raw_bytes::Vector{UInt8}, nrows::Int, ncols
         for j in 1:ncols
             # Allocation-free delimiter skipping
             while pos <= len && (
-                    raw_bytes[pos] == 0x2c || raw_bytes[pos] == 0x3b ||
+                    raw_bytes[pos] == delim_byte ||
                         raw_bytes[pos] == 0x0a || raw_bytes[pos] == 0x0d
                 )
                 pos += 1
@@ -130,11 +131,24 @@ function read_csv_to_sparse_matrix(zip_reader::za.ZipReader, filename::String)
         return dropzeros(sparse(Int[], Int[], Float64[], 0, 0))
     end
 
-    # Determine structural column count from the initial data row
-    ncols = 1
+    # Detect the delimiter (either ',' or ';') by inspecting the first line
+    delim = ','
     @inbounds for pos in 1:len
         b = raw_data[pos]
-        if b == 0x2c || b == 0x3b # ',' or ';'
+        if b == 0x3b # ';'
+            delim = ';'
+            break
+        elseif b == 0x0a # '\n'
+            break
+        end
+    end
+
+    # Determine structural column count from the initial data row using the detected delimiter
+    ncols = 1
+    delim_byte = UInt8(delim)
+    @inbounds for pos in 1:len
+        b = raw_data[pos]
+        if b == delim_byte
             ncols += 1
         elseif b == 0x0a # '\n'
             break
@@ -145,7 +159,7 @@ function read_csv_to_sparse_matrix(zip_reader::za.ZipReader, filename::String)
     nrows = length(row_starts)
 
     @info "Started parsing matrix: Size specified as $nrows x $ncols"
-    return custom_gloria_sparse_parser(raw_data, nrows, ncols)
+    return custom_gloria_sparse_parser(raw_data, nrows, ncols; delim=delim)
 end
 
 """
@@ -205,7 +219,9 @@ function __construct_IO(data_sut::Dict{String, SparseMatrixCSC{Float64, Int}}; c
         # Sparse * Sparse Matrix Multiplication (Native, extremely quick, runs in O(nnz) RAM)
         A_mat = U * T_matrix
 
-        return Dict("A" => A_mat)
+        return Dict{String, SparseMatrixCSC{Float64, Int}}("A" => A_mat)
+    else
+        throw(ArgumentError("Unsupported construction type: $construct"))
     end
 end
 

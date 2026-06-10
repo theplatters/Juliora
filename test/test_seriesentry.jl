@@ -1,4 +1,3 @@
-function test_seriesentry()
     @testset "SeriesEntry Constructor" begin
         # Test basic construction
         data = [100.0, 200.0, 150.0, 300.0]
@@ -55,7 +54,7 @@ function test_seriesentry()
         series = SeriesEntry(int_data, indices)
         
         @test series.data isa Vector{Float64}
-        @test all(x -> x isa Float64 for x in series.data)
+        @test all(x -> x isa Float64, series.data)
         
         # Test indices with mixed types
         mixed_indices = DataFrame(
@@ -114,4 +113,3 @@ function test_seriesentry()
         
         @test fresh_series.data == [1.0, 2.0, 3.0]
     end
-end
