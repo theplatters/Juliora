@@ -10,7 +10,7 @@
         Sector = ["Agriculture", "Manufacturing", "Services"]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     @test size(matrix_entry.data) == (3, 3)
     @test matrix_entry.data == data
@@ -21,7 +21,7 @@
     
     # Test dimension mismatch error
     wrong_data = [1.0 2.0; 3.0 4.0]  # 2x2 but indices are 3x3
-    @test_throws AssertionError IO.Matrixentry(wrong_data, col_df, row_df)
+    @test_throws AssertionError IO.MatrixEntry(wrong_data, col_df, row_df)
     
     # Test lookup dictionary functionality
     usa_agr_key = (Country="USA", Sector="Agriculture")
@@ -44,7 +44,7 @@ end
         Sector = ["Agr", "Man"]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test valid indexing
     @test matrix_entry[(Country="USA", Sector="Agr"), (Country="USA", Sector="Agr")] == 1.0
@@ -67,7 +67,7 @@ end
     single_row = DataFrame(Country=["USA"], Sector=["Total"])
     single_col = DataFrame(Country=["USA"], Sector=["Total"])
     
-    single_matrix = IO.Matrixentry(single_data, single_col, single_row)
+    single_matrix = IO.MatrixEntry(single_data, single_col, single_row)
     @test single_matrix[(Country="USA", Sector="Total"), (Country="USA", Sector="Total")] == 42.0
     
     # Test with different column types
@@ -82,7 +82,7 @@ end
         Type = ["X", "Y"]
     )
     
-    mixed_matrix = IO.Matrixentry(mixed_data, mixed_col, mixed_row)
+    mixed_matrix = IO.MatrixEntry(mixed_data, mixed_col, mixed_row)
     @test mixed_matrix[(ID=1, Name="A", Active=true), (ID=10, Type="X")] == 1.0
     @test mixed_matrix[(ID=2, Name="B", Active=false), (ID=20, Type="Y")] == 4.0
 end
@@ -92,7 +92,7 @@ end
     row_df = DataFrame(A=[1, 2], B=["X", "Y"])
     col_df = DataFrame(C=[10, 20], D=["P", "Q"])
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test that returned values are Float64
     val = matrix_entry[(A=1, B="X"), (C=10, D="P")]

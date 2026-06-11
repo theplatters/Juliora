@@ -12,7 +12,7 @@
         Sector = ["Primary", "Secondary", "Tertiary"]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test sum by rows (exports by country)
     row_sums = sum_by_country(matrix_entry; dimension=:rows)
@@ -50,7 +50,7 @@ end
         Sector = ["Agr", "Man"]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test sum by row sectors
     row_sector_sums = sum_by_sector(matrix_entry; dimension=:rows)
@@ -87,7 +87,7 @@ end
         Sector = repeat(["Goods", "Services"], 2)
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test grouping by single column (rows)
     country_groups = groupby_matrix(matrix_entry, :CountryCode; rows=true)
@@ -127,7 +127,7 @@ end
     row_df = DataFrame(Country = ["A", "B", "C"])
     col_df = DataFrame(Sector = ["X", "Y", "Z"])
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     summary_stats = matrix_summary(matrix_entry)
     
     @test nrow(summary_stats) == 1
@@ -150,7 +150,7 @@ end
     
     # Test with all zeros
     zero_data = zeros(2, 2)
-    zero_matrix = IO.Matrixentry(zero_data, DataFrame(A=[1,2]), DataFrame(B=[1,2]))
+    zero_matrix = IO.MatrixEntry(zero_data, DataFrame(A=[1,2]), DataFrame(B=[1,2]))
     zero_summary = matrix_summary(zero_matrix)
     
     @test zero_summary.total[1] == 0.0
@@ -164,7 +164,7 @@ end
     row_df = DataFrame(CountryCode = ["USA", "CHN", "DEU"])
     col_df = DataFrame(CountryCode = ["USA", "CHN", "DEU"])
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     country_flows = country_summary(matrix_entry)
     
     @test nrow(country_flows) == 9  # 3×3 country pairs
@@ -196,7 +196,7 @@ end
         Sector = repeat(["Agr", "Man"], 3)
     )
     
-    multi_matrix = IO.Matrixentry(multi_data, multi_col_df, multi_row_df)
+    multi_matrix = IO.MatrixEntry(multi_data, multi_col_df, multi_row_df)
     multi_summary = country_summary(multi_matrix)
     
     @test nrow(multi_summary) == 9  # Still 3×3 countries
@@ -216,7 +216,7 @@ end
         Type = ["Primary", "Secondary"]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test pivot by country and sector
     wide_df = pivot_matrix_to_wide(matrix_entry, [:Country], :Sector)
@@ -255,7 +255,7 @@ end
         Share = [0.1, 0.3]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test adding calculated column to rows
     with_region = add_calculated_column(

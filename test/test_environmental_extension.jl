@@ -13,14 +13,14 @@
     x_output = [10.0, 20.0, 30.0]  # Total output by sector
     
     # Create environmental extension manually
-    f_matrix = IO.Matrixentry(f_data, sector_indices, stressor_indices)
-    a_matrix = IO.Matrixentry(f_data ./ x_output', sector_indices, stressor_indices)
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices)
     
     env_ext = EnvironmentalExtension(f_matrix, a_matrix)
     
     @test env_ext isa EnvironmentalExtension
-    @test env_ext.A isa IO.Matrixentry
-    @test env_ext.F isa IO.Matrixentry
+    @test env_ext.A isa IO.MatrixEntry
+    @test env_ext.F isa IO.MatrixEntry
     
     # Test that dimensions are correct
     @test size(env_ext.F.data) == (3, 3)
@@ -54,8 +54,8 @@ end
     )
     x_output = [1000.0, 2000.0]
     
-    f_matrix = IO.Matrixentry(f_data, sector_indices, stressor_indices)
-    a_matrix = IO.Matrixentry(f_data ./ x_output', sector_indices, stressor_indices)
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices)
     env_ext = EnvironmentalExtension(f_matrix, a_matrix)
     
     # Test direct access to environmental impacts
@@ -88,8 +88,8 @@ end
     )
     x_output = rand(6) * 10000
     
-    f_matrix = IO.Matrixentry(f_data, sector_indices, stressor_indices)
-    a_matrix = IO.Matrixentry(f_data ./ x_output', sector_indices, stressor_indices)
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices)
     env_ext = EnvironmentalExtension(f_matrix, a_matrix)
     
     # Filter for CO2 emissions only
@@ -137,8 +137,8 @@ end
     )
     x_output = [100.0, 200.0, 300.0]
     
-    f_matrix = IO.Matrixentry(f_data, sector_indices, stressor_indices)
-    a_matrix = IO.Matrixentry(f_data ./ x_output', sector_indices, stressor_indices)
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices)
     env_ext = EnvironmentalExtension(f_matrix, a_matrix)
     
     # Test total impacts by stressor
@@ -185,11 +185,11 @@ end
     x_output = [0.0, 10.0]  # Zero output for first sector
     
     # The constructor should handle this gracefully (usually by replacing 0 with 1 or Inf)
-    f_matrix = IO.Matrixentry(f_data, sector_indices, stressor_indices)
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
     
     # Manual calculation with zero handling
     safe_x = replace(x_output, 0.0 => 1.0)  # Replace zeros to avoid division by zero
-    a_matrix = IO.Matrixentry(f_data ./ safe_x', sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ safe_x', sector_indices, stressor_indices)
     
     env_ext = EnvironmentalExtension(f_matrix, a_matrix)
     
@@ -200,8 +200,8 @@ end
     
     # Test with all zero impacts
     zero_f_data = zeros(2, 2)
-    zero_f_matrix = IO.Matrixentry(zero_f_data, sector_indices, stressor_indices)
-    zero_a_matrix = IO.Matrixentry(zero_f_data ./ safe_x', sector_indices, stressor_indices)
+    zero_f_matrix = IO.MatrixEntry(zero_f_data, sector_indices, stressor_indices)
+    zero_a_matrix = IO.MatrixEntry(zero_f_data ./ safe_x', sector_indices, stressor_indices)
     zero_env_ext = EnvironmentalExtension(zero_f_matrix, zero_a_matrix)
     
     @test all(zero_env_ext.F.data .== 0.0)
@@ -213,8 +213,8 @@ end
     single_stressor = DataFrame(Stressor = ["CO2"], Source = ["All"])
     single_x = [100.0]
     
-    single_f_matrix = IO.Matrixentry(single_f, single_sector, single_stressor)
-    single_a_matrix = IO.Matrixentry(single_f ./ single_x', single_sector, single_stressor)
+    single_f_matrix = IO.MatrixEntry(single_f, single_sector, single_stressor)
+    single_a_matrix = IO.MatrixEntry(single_f ./ single_x', single_sector, single_stressor)
     single_env_ext = EnvironmentalExtension(single_f_matrix, single_a_matrix)
     
     @test size(single_env_ext.F.data) == (1, 1)

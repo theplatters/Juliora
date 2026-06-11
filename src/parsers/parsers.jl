@@ -1,4 +1,4 @@
-module PyMRIOParser
+module Parser
 
 using CSV
 using DataFrames

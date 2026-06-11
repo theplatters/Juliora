@@ -12,7 +12,7 @@
         EU = [false, false, true]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     @testset "Boolean Indexing Both Dimensions" begin
         # Test filtering both rows and columns
@@ -65,7 +65,7 @@ end
         Primary = [true, false]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Filter only developed countries (keep all columns)
     developed_mask = matrix_entry.row_indices.Type .== "Developed"
@@ -94,7 +94,7 @@ end
         Services = [false, false, true]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Filter only service sectors (keep all rows)
     service_mask = matrix_entry.col_indices.Services
@@ -130,7 +130,7 @@ end
         Important = [false, true, true, false]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Complex row condition: developed countries with GDP > 10000
     rich_developed = (matrix_entry.row_indices.Developed) .& (matrix_entry.row_indices.GDP .> 10000)
@@ -164,13 +164,13 @@ end
         Tradable = [true, false]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test that filtered MatrixEntry maintains all structure
     asian_mask = matrix_entry.row_indices.Region .== "Asia"
     asian_filtered = matrix_entry[asian_mask, :]
     
-    @test asian_filtered isa IO.Matrixentry
+    @test asian_filtered isa IO.MatrixEntry
     @test haskey(asian_filtered.row_lookup, (Country="CHN", Region="Asia"))
     @test haskey(asian_filtered.col_lookup, (Sector="Goods", Tradable=true))
     @test haskey(asian_filtered.col_lookup, (Sector="Services", Tradable=false))

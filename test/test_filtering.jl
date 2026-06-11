@@ -11,7 +11,7 @@
         Share = [0.1, 0.3, 0.6]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test simple country filtering
     usa_filtered = filter_rows(matrix_entry, row -> row.Country == "USA")
@@ -56,7 +56,7 @@ end
         Tradable = [true, true, false, true]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test simple sector filtering
     agr_filtered = filter_cols(matrix_entry, col -> col.Sector == "Agr")
@@ -96,7 +96,7 @@ end
         EU = [false, false, true]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test filtering both dimensions
     developed_to_eu = filter_matrix(
@@ -143,7 +143,7 @@ end
     single_row = DataFrame(ID=[1], Name=["A"])
     single_col = DataFrame(ID=[1], Type=["X"])
     
-    single_matrix = IO.Matrixentry(single_data, single_col, single_row)
+    single_matrix = IO.MatrixEntry(single_data, single_col, single_row)
     
     # Filter that matches
     match_filter = filter_rows(single_matrix, row -> row.ID == 1)
@@ -162,7 +162,7 @@ end
     )
     col_df = DataFrame(Sector = ["A", "B"])
     
-    matrix_missing = IO.Matrixentry(data_missing, col_df, row_missing)
+    matrix_missing = IO.MatrixEntry(data_missing, col_df, row_missing)
     
     # Filter handling missing values
     non_missing_pop = filter_rows(matrix_missing, row -> !ismissing(row.Population))
@@ -186,12 +186,12 @@ end
         ID = [1, 2]
     )
     
-    matrix_entry = IO.Matrixentry(data, col_df, row_df)
+    matrix_entry = IO.MatrixEntry(data, col_df, row_df)
     
     # Test that filtered result maintains lookup functionality
     filtered = filter_rows(matrix_entry, row -> row.Country != "CHN")
     
-    @test filtered isa IO.Matrixentry
+    @test filtered isa IO.MatrixEntry
     @test haskey(filtered.row_lookup, (Country="USA", Code="US"))
     @test haskey(filtered.row_lookup, (Country="DEU", Code="DE"))
     @test !haskey(filtered.row_lookup, (Country="CHN", Code="CN"))
