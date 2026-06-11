@@ -112,7 +112,7 @@ function custom_gloria_sparse_parser(::Serial, raw_bytes::Vector{UInt8}, len::In
     return construct_sparse_from_row_major(I, J, V, nrows, ncols)
 end
 
-function emblace!(A, i, j, pos, res)
+function emplace!(A, i, j, pos, res)
 
     if Parsers.ok(res.code)
         A[i, j] = res.val
@@ -123,7 +123,19 @@ function emblace!(A, i, j, pos, res)
     return pos
 end
 
-function parse(::TFile, raw_bytes::Vector{UInt8}; delim::Char = ",")
+@inline function global_to_local_idx(global_idx::Int)
+    # Determine which region block we are in (1-indexed)
+    region_block = (global_idx - 1) ÷ (2 * N_SECTORS)
+
+    # Find the position relative to the start of this region's block
+    rem_idx = (global_idx - 1) % (2 * N_SECTORS)
+
+    # Map the index back down to a consolidated continuous index
+    local_idx = (region_block * N_SECTORS) + (rem_idx % N_SECTORS) + 1
+    return local_idx
+end
+
+function parse(::TFile, raw_bytes::Vector{UInt8}; delim::Char = ',')
     len = length(raw_bytes)
     row_starts = find_row_starts(raw_bytes)
     delim_byte = UInt8(delim)
@@ -139,28 +151,29 @@ function parse(::TFile, raw_bytes::Vector{UInt8}; delim::Char = ",")
 
     for i in 1:nrows
         pos = row_starts[i]
+        local_i = global_to_local_idx(i)
         for j in 1:ncols
             while pos <= len && (is_delim_or_newline(raw_bytes[pos], delim_byte))
                 pos += 1
             end
 
-            if try_skip_zero(raw_bytes, pos, len, delim_byte)
-                pos += 1
-                continue
-            end
 
-            if (industry_mask[i] && product_mask[j]) || product_mask[i] && industry_mask[j]
-                res = Parsers.xparse(Float64, raw_bytes, pos, len, opts)
-                industry_mask[i] && product_mask[j] && emblace!(S, i, j, pos, res)
-                product_mask[i] && industry_mask[j] && emblace!(S, i, j, pos, res)
+            res = Parsers.xparse(Float64, raw_bytes, pos, len, opts)
 
-            else
-                while pos <= len && !(is_delim_or_newline(raw_bytes[pos], delim_byte))
-                    pos += 1
+            local_j = global_to_local_idx(j)
+            if (industry_mask[i] && product_mask[j])
+                if Parsers.ok(res.code)
+                    S[local_i, local_j] = res.val
                 end
-
+                pos += res.tlen
+            elseif (product_mask[i] && industry_mask[j])
+                if Parsers.ok(res.code)
+                    U[local_i, local_j] = res.val
+                end
+                pos += res.tlen
+            else
+                pos += res.tlen
             end
-
 
         end
     end
@@ -205,11 +218,6 @@ function parse(::VAFile, raw_data::Vector{UInt8})
         for j in 1:ncols
             while pos <= len && is_delim_or_newline(raw_data[pos], delim_byte)
                 pos += 1
-            end
-
-            if try_skip_zero(raw_data, pos, len, delim_byte)
-                pos += 1
-                continue
             end
 
             if product_mask[j]
@@ -272,11 +280,6 @@ function parse(::YFile, raw_data::Vector{UInt8})
                 pos += 1
             end
 
-            if try_skip_zero(raw_data, pos, len, delim_byte)
-                pos += 1
-                continue
-            end
-
             res = Parsers.xparse(Float64, raw_data, pos, len, opts)
             if Parsers.ok(res.code)
                 A[i, j] = res.val
@@ -291,7 +294,7 @@ function parse(::YFile, raw_data::Vector{UInt8})
 end
 
 
-function read(file_type, filename)
+function read(file_type::AbstractGloriaElement, filename)
     return open(filename, "r") do file
         raw_data = Mmap.mmap(file)
         return parse(file_type, raw_data)
@@ -307,61 +310,11 @@ function parse_gloria_sut(path::String; year::Integer = 2019, version::Integer =
 
     extension = get_extention(price)
 
-    gloria_mrio_files = (
-        "T" => "20260121_120secMother_AllCountries_002_T-Results_$(year)_0$(version)_$(extension).csv",
-        "Y" => "20260121_120secMother_AllCountries_002_Y-Results_$(year)_0$(version)_$(extension).csv",
-        "VA" => "20260121_120secMother_AllCountries_002_V-Results_$(year)_0$(version)_$(extension).csv",
-    )
 
-    # Determine unzipped directory path
-    dir_path = path
-    if !isdir(dir_path)
-        throw(ParserError("Path is not a directory: $dir_path"))
-    end
-
-    first_file = gloria_mrio_files[1].second
-    if !isfile(joinpath(dir_path, first_file))
-        subdir = joinpath(path, "GLORIA_MRIOs_$(version)_$year")
-        if isdir(subdir) && isfile(joinpath(subdir, first_file))
-            dir_path = subdir
-        else
-            throw(ParserError("Could not find GLORIA SUT files in $path or $subdir"))
-        end
-    end
-
-    S, U = parse(TFile(), gloria_mrio_files["T"])
-    Y = parse(YFile(), gloria_mrio_files["Y"])
-    VA = parse(VAFile(), gloria_mrio_files["VA"])
+    S, U = read(TFile(), joinpath(path, "20260121_120secMother_AllCountries_002_T-Results_$(year)_0$(version)_$(extension).csv"))
+    Y = read(YFile(), joinpath(path, "20260121_120secMother_AllCountries_002_Y-Results_$(year)_0$(version)_$(extension).csv"))
+    VA = read(VAFile(), joinpath(path, "20260121_120secMother_AllCountries_002_V-Results_$(year)_0$(version)_$(extension).csv"))
     return (S, U, Y, VA)
-end
-
-function extract_sut(sut_matrices)
-    T_raw = sut_matrices["T"]
-    Y_raw = sut_matrices["Y"]
-    VA_raw = sut_matrices["VA"]
-
-    n_regions = size(Y_raw, 2) ÷ 6
-    n_sectors = size(T_raw, 1) ÷ (2 * n_regions)
-
-    industry_mask = fill(false, n_regions * 2 * n_sectors)
-    product_mask = fill(false, n_regions * 2 * n_sectors)
-    for r in 1:n_regions
-        base = (r - 1) * 2 * n_sectors
-        industry_mask[(base + 1):(base + n_sectors)] .= true
-        product_mask[(base + n_sectors + 1):(base + 2 * n_sectors)] .= true
-    end
-
-    V = T_raw[industry_mask, product_mask] |> Matrix
-    U = T_raw[product_mask, industry_mask] |> Matrix
-    Y = Y_raw[product_mask, :] |> Matrix
-    VA = VA_raw[:, industry_mask] |> Matrix
-
-
-    @info "Created masks, with dimensions $(size(V)) type $(typeof(V))"
-
-
-    return (V, U, Y, VA)
-
 end
 
 
@@ -514,7 +467,7 @@ end
 
 Parses raw GLORIA SUT tables, reads Excel readme metadata, and constructs a complete MRIO database.
 """
-function parse_gloria(path::String, year::Int; version = 60, price = BasePrice())
+function parse_gloria(path::String, year::Int; version = 60, price = BasePrice(), country_names = "gloria")
     (S, U, Y, VA) = parse_gloria_sut(path; year = year, version = version, price = price)
 
     # Find the readme file
