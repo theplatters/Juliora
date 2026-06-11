@@ -135,27 +135,26 @@ using Random
             # 1. Valid inputs/syntax
             ZipArchives.ZipWriter(zip_path) do w
                 ZipArchives.zip_newfile(w, t_file)
-                write(w, "1.0,0.0\n0.0,2.0\n")
+                write(w, "1.0,2.0\n3.0,4.0\n")
                 ZipArchives.zip_newfile(w, y_file)
-                write(w, "3.0,0.0\n0.0,4.0\n")
+                write(w, "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,5.0,5.0,5.0,5.0,5.0\n")
                 ZipArchives.zip_newfile(w, va_file)
-                write(w, "5.0,0.0\n0.0,6.0\n")
+                write(w, "6.0,0.0\n7.0,0.0\n")
             end
 
             sut = P.parse_gloria_sut(tmpdir, year; version = version, price = price)
-            @test sut isa Dict{String, SparseMatrixCSC{Float64, Int}}
-            @test haskey(sut, "T")
-            @test haskey(sut, "Y")
-            @test haskey(sut, "VA")
-            @test sut["T"] == sparse([1.0 0.0; 0.0 2.0])
-            @test sut["Y"] == sparse([3.0 0.0; 0.0 4.0])
-            @test sut["VA"] == sparse([5.0 0.0; 0.0 6.0])
+            @test sut isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+            V, U, Y, VA = sut
+            @test V == [2.0;;]
+            @test U == [3.0;;]
+            @test Y == [5.0 5.0 5.0 5.0 5.0 5.0]
+            @test VA == [6.0; 7.0;;]
 
             # Test type stability via a helper
             function run_parse()
                 P.parse_gloria_sut(tmpdir, year; version = version, price = price)
             end
-            @test (@inferred run_parse()) isa Dict{String, SparseMatrixCSC{Float64, Int}}
+            @test (@inferred run_parse()) isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
 
             # 2. Empty inputs
             zip_name_empty = "GLORIA_MRIOs_$(version)_$(year + 1).zip"
@@ -173,9 +172,12 @@ using Random
             end
 
             sut_empty = P.parse_gloria_sut(tmpdir, year + 1; version = version, price = price)
-            @test sut_empty["T"] == dropzeros(sparse(Int[], Int[], Float64[], 0, 0))
-            @test sut_empty["Y"] == dropzeros(sparse(Int[], Int[], Float64[], 0, 0))
-            @test sut_empty["VA"] == dropzeros(sparse(Int[], Int[], Float64[], 0, 0))
+            @test sut_empty isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+            V_e, U_e, Y_e, VA_e = sut_empty
+            @test size(V_e) == (0, 0)
+            @test size(U_e) == (0, 0)
+            @test size(Y_e) == (0, 0)
+            @test size(VA_e) == (0, 0)
 
             # 3. Invalid/malformed inputs (missing VA file entry)
             zip_name_missing = "GLORIA_MRIOs_$(version)_$(year + 2).zip"
@@ -194,21 +196,22 @@ using Random
             # Setup unzipped directory directly
             unzipped_dir = joinpath(tmpdir, "GLORIA_MRIOs_$(version)_$(year)")
             mkpath(unzipped_dir)
-            write(joinpath(unzipped_dir, t_file), "1.0,0.0\n0.0,2.0\n")
-            write(joinpath(unzipped_dir, y_file), "3.0,0.0\n0.0,4.0\n")
-            write(joinpath(unzipped_dir, va_file), "5.0,0.0\n0.0,6.0\n")
+            write(joinpath(unzipped_dir, t_file), "1.0,2.0\n3.0,4.0\n")
+            write(joinpath(unzipped_dir, y_file), "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,5.0,5.0,5.0,5.0,5.0\n")
+            write(joinpath(unzipped_dir, va_file), "6.0,0.0\n7.0,0.0\n")
 
             # Test explicit is_unzipped = true with direct directory path
             sut_unzipped1 = P.parse_gloria_sut(unzipped_dir, year, true; version = version, price = price)
-            @test sut_unzipped1 isa Dict{String, SparseMatrixCSC{Float64, Int}}
-            @test sut_unzipped1["T"] == sparse([1.0 0.0; 0.0 2.0])
-            @test sut_unzipped1["Y"] == sparse([3.0 0.0; 0.0 4.0])
-            @test sut_unzipped1["VA"] == sparse([5.0 0.0; 0.0 6.0])
+            @test sut_unzipped1 isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+            V_uz1, U_uz1, Y_uz1, VA_uz1 = sut_unzipped1
+            @test V_uz1 == [2.0;;]
+            @test U_uz1 == [3.0;;]
 
             # Test explicit is_unzipped = true with parent directory path
             sut_unzipped2 = P.parse_gloria_sut(tmpdir, year, true; version = version, price = price)
-            @test sut_unzipped2 isa Dict{String, SparseMatrixCSC{Float64, Int}}
-            @test sut_unzipped2["T"] == sparse([1.0 0.0; 0.0 2.0])
+            @test sut_unzipped2 isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+            V_uz2, U_uz2, Y_uz2, VA_uz2 = sut_unzipped2
+            @test V_uz2 == [2.0;;]
 
             # Test automatic detection (fallback) when zip file does not exist
             # Create a new year for testing fallback without a zip file
@@ -219,53 +222,60 @@ using Random
 
             unzipped_dir_auto = joinpath(tmpdir, "GLORIA_MRIOs_$(version)_$(year_auto)")
             mkpath(unzipped_dir_auto)
-            write(joinpath(unzipped_dir_auto, t_file_auto), "1.0,0.0\n0.0,2.0\n")
-            write(joinpath(unzipped_dir_auto, y_file_auto), "3.0,0.0\n0.0,4.0\n")
-            write(joinpath(unzipped_dir_auto, va_file_auto), "5.0,0.0\n0.0,6.0\n")
+            write(joinpath(unzipped_dir_auto, t_file_auto), "1.0,2.0\n3.0,4.0\n")
+            write(joinpath(unzipped_dir_auto, y_file_auto), "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,5.0,5.0,5.0,5.0,5.0\n")
+            write(joinpath(unzipped_dir_auto, va_file_auto), "6.0,0.0\n7.0,0.0\n")
 
             # Since no zip file exists for year_auto in tmpdir, it should detect and parse the unzipped directory
             sut_auto = P.parse_gloria_sut(tmpdir, year_auto; version = version, price = price)
-            @test sut_auto isa Dict{String, SparseMatrixCSC{Float64, Int}}
-            @test sut_auto["T"] == sparse([1.0 0.0; 0.0 2.0])
-            @test sut_auto["Y"] == sparse([3.0 0.0; 0.0 4.0])
-            @test sut_auto["VA"] == sparse([5.0 0.0; 0.0 6.0])
+            @test sut_auto isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+            V_auto, U_auto, Y_auto, VA_auto = sut_auto
+            @test V_auto == [2.0;;]
 
             # Test non-existent unzipped directory path throws exception
             @test_throws Exception P.parse_gloria_sut(joinpath(tmpdir, "does_not_exist"), year, true; version = version, price = price)
         end
     end
 
-    @testset "__construct_IO" begin
+    @testset "_construct_IO" begin
         # 1. Valid inputs/syntax
-        V = sparse([2.0 0.0 2.0; 0.0 4.0 0.0])
-        U = sparse([1.0 0.0; 0.0 2.0; 3.0 4.0])
-        data_sut = Dict("VA" => V, "T" => U)
+        regions = ["USA", "CHN"]
+        sectors = ["Sec1", "Sec2"]
+        va_cats = ["VA1", "VA2"]
+        fd_cats = ["FD1", "FD2"]
 
-        res = P._construct_IO(data_sut; construct = "B")
-        @test res isa Dict{String, SparseMatrixCSC{Float64, Int}}
-        @test haskey(res, "A")
-        @test res["A"] == sparse([0.5 0.0 0.5; 0.0 2.0 0.0; 1.5 4.0 1.5])
+        V = [1.0 0.0 0.0 0.0;
+             0.0 2.0 0.0 0.0;
+             0.0 0.0 3.0 0.0;
+             0.0 0.0 0.0 4.0]
+        U = [0.5 0.0 0.0 0.0;
+             0.0 0.5 0.0 0.0;
+             0.0 0.0 0.5 0.0;
+             0.0 0.0 0.0 0.5]
+        Y = [1.0 0.0 0.0 0.0;
+             0.0 1.0 0.0 0.0;
+             0.0 0.0 1.0 0.0;
+             0.0 0.0 0.0 1.0]
+        VA = [2.0 0.0 0.0 0.0;
+              0.0 2.0 0.0 0.0;
+              0.0 0.0 2.0 0.0;
+              0.0 0.0 0.0 2.0]
 
-        res = P._construct_IO(data_sut; construct = "B")
-        @test res isa Dict{String, SparseMatrixCSC{Float64, Int}}
+        res = P._construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats)
+        @test res isa Juliora.MRIO
+        @test size(res.T.data) == (4, 4)
+        @test size(res.A.data) == (4, 4)
+        @test size(res.FD.data) == (4, 4)
+        @test size(res.VA.data) == (4, 4)
 
         # 2. Empty inputs
-        data_empty = Dict(
-            "VA" => dropzeros(sparse(Int[], Int[], Float64[], 0, 0)),
-            "T" => dropzeros(sparse(Int[], Int[], Float64[], 0, 0))
+        res_empty = P._construct_IO(
+            Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
+            Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
+            String[], String[], String[], String[]
         )
-        res_empty = P._construct_IO(data_empty; construct = "B")
-        @test res_empty isa Dict{String, SparseMatrixCSC{Float64, Int}}
-        @test size(res_empty["A"]) == (0, 0)
-
-        # 3. Invalid/malformed inputs
-        data_missing = Dict("VA" => V)
-        @test_throws KeyError P._construct_IO(data_missing; construct = "B")
-
-        V_bad = sparse(rand(4, 3))
-        U_bad = sparse(rand(3, 3))
-        data_bad_dim = Dict("VA" => V_bad, "T" => U_bad)
-        @test_throws DimensionMismatch P.__construct_IO(data_bad_dim; construct = "B")
+        @test res_empty isa Juliora.MRIO
+        @test size(res_empty.T.data) == (0, 0)
     end
 end
 
@@ -362,7 +372,7 @@ end
 end
 
 @testset "parse_gloria integration" begin
-    path = "data/GLORIA/2019"
+    path = "data/GLORIA"
     year = 2019
     version = 60
 

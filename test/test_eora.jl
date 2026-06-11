@@ -69,7 +69,7 @@ function filter_eora(
         eora.VA.row_indices
     )
 
-    return Eora(Z = filtered_Z, Y = filtered_Y, VA = filtered_VA)
+    return MRIO(Z = filtered_Z, Y = filtered_Y, VA = filtered_VA)
 end
 
 # Analysis functions
