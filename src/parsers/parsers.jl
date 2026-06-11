@@ -7,6 +7,8 @@ using LinearAlgebra
 using Mmap
 using Parsers
 using SparseArrays # Crucial for low-RAM high-performance processing
+using XLSX
+import ..Juliora: MRIO, MatrixEntry, SeriesEntry, LeontiefFactorization, EnvironmentalExtension, calculate_leontief_factorization
 
 export ParserError, ParserWarning, parse_gloria, parse_gloria_sut, __construct_IO
 
@@ -362,6 +364,12 @@ function parse_gloria_sut(path::String, year::Int; version = 60, price::Abstract
         "VA" => "20260121_120secMother_AllCountries_002_V-Results_$(year)_0$(version)_$(extension).csv",
     )
 
+    unzipped_dir = joinpath(path, "GLORIA_MRIOs_$(version)_$year")
+    if isdir(unzipped_dir)
+        @info "GLORIA unzipped directory exists. Prioritizing unzipped parsing."
+        return parse_gloria_sut(path, year, true; version = version, price = price)
+    end
+
     gloria_path = joinpath(path, "GLORIA_MRIOs_$(version)_$year.zip")
 
     # If the zip file does not exist, but we detect files/directories that look unzipped, fallback to unzipped.
@@ -467,8 +475,206 @@ function __construct_IO(data_sut::Dict{String, SparseMatrixCSC{Float64, Int}}; c
     end
 end
 
-function parse_gloria(path::String, year::Int; version = 59, price = "bp", country_names = "gloria", construct = "B")
-    # Implementation wrapper...
+"""
+    __construct_IO(sut_matrices::Dict{String, SparseMatrixCSC{Float64, Int}}, regions::Vector, sectors::Vector, va_cats::Vector, fd_cats::Vector; construct = "B")
+
+Constructs the symmetric input-output matrices and indices, returning a complete MRIO struct.
+"""
+function __construct_IO(
+    sut_matrices::Dict{String, SparseMatrixCSC{Float64, Int}},
+    regions::Vector,
+    sectors::Vector,
+    va_cats::Vector,
+    fd_cats::Vector;
+    construct = "B"
+)
+    if construct != "B"
+        throw(ArgumentError("Unsupported construction type: $construct"))
+    end
+
+    T_raw = sut_matrices["T"]
+    Y_raw = sut_matrices["Y"]
+    VA_raw = sut_matrices["VA"]
+
+    n_regions = size(Y_raw, 2) ÷ 6
+    n_sectors = size(T_raw, 1) ÷ (2 * n_regions)
+
+    industry_mask = fill(false, n_regions * 2 * n_sectors)
+    product_mask = fill(false, n_regions * 2 * n_sectors)
+    for r in 1:n_regions
+        base = (r - 1) * 2 * n_sectors
+        industry_mask[base + 1 : base + n_sectors] .= true
+        product_mask[base + n_sectors + 1 : base + 2 * n_sectors] .= true
+    end
+
+    V = T_raw[industry_mask, product_mask]
+    U = T_raw[product_mask, industry_mask]
+    Y = Y_raw[product_mask, :]
+    VA = VA_raw[:, industry_mask]
+
+    # Industry output (row sum of V)
+    g = vec(sum(V, dims = 2))
+    g_inv = map(x -> x == 0.0 ? 0.0 : 1.0 / x, g)
+
+    # T_matrix = diag(g_inv) * V
+    T_matrix = g_inv .* V
+
+    # Z (intermediate transaction matrix) = U * T_matrix
+    Z_mat = U * T_matrix
+
+    # Commodity output q = row sum of U + row sum of Y
+    q = vec(sum(U, dims = 2) + sum(Y, dims = 2))
+    q_inv = map(x -> x == 0.0 ? 0.0 : 1.0 / x, q)
+
+    # A = Z_mat * diag(q_inv) = Z_mat .* q_inv'
+    A_mat = Z_mat .* q_inv'
+
+    # VA_new = VA * T_matrix
+    VA_mat = VA * T_matrix
+
+    # Identify empty countries (Such as DYE in 2022)
+    row_sums = vec(sum(Z_mat, dims = 2))
+    col_sums = vec(sum(Z_mat, dims = 1))
+
+    empty_country_indices = Int[]
+    for i in 1:length(regions)
+        r_start = (i - 1) * n_sectors + 1
+        r_end = i * n_sectors
+
+        is_empty_row = all(row_sums[r_start:r_end] .== 0.0)
+        is_empty_col = all(col_sums[r_start:r_end] .== 0.0)
+
+        if is_empty_row && is_empty_col
+            push!(empty_country_indices, i)
+        end
+    end
+
+    keep_country_mask = fill(true, length(regions))
+    keep_country_mask[empty_country_indices] .= false
+    regions_clean = regions[keep_country_mask]
+
+    keep_sector_mask = fill(true, length(regions) * n_sectors)
+    for idx in empty_country_indices
+        r_start = (idx - 1) * n_sectors + 1
+        r_end = idx * n_sectors
+        keep_sector_mask[r_start:r_end] .= false
+    end
+
+    keep_fd_mask = fill(true, length(regions) * 6)
+    for idx in empty_country_indices
+        r_start = (idx - 1) * 6 + 1
+        r_end = idx * 6
+        keep_fd_mask[r_start:r_end] .= false
+    end
+
+    keep_va_mask = fill(true, length(regions) * length(va_cats))
+    for idx in empty_country_indices
+        r_start = (idx - 1) * length(va_cats) + 1
+        r_end = idx * length(va_cats)
+        keep_va_mask[r_start:r_end] .= false
+    end
+
+    Z_mat = Z_mat[keep_sector_mask, keep_sector_mask]
+    A_mat = A_mat[keep_sector_mask, keep_sector_mask]
+    Y = Y[keep_sector_mask, keep_fd_mask]
+    VA_mat = VA_mat[keep_va_mask, keep_sector_mask]
+    q = q[keep_sector_mask]
+
+    # Construct index DataFrames
+    n_regions_clean = length(regions_clean)
+
+    country_codes = Vector{String}(undef, n_regions_clean * n_sectors)
+    sector_names = Vector{String}(undef, n_regions_clean * n_sectors)
+    idx = 1
+    for r in regions_clean
+        for s in sectors
+            country_codes[idx] = string(r)
+            sector_names[idx] = string(s)
+            idx += 1
+        end
+    end
+    t_row_indices = DataFrame(CountryCode = country_codes, Sector = sector_names)
+
+    country_codes_fd = Vector{String}(undef, n_regions_clean * length(fd_cats))
+    fd_categories = Vector{String}(undef, n_regions_clean * length(fd_cats))
+    idx = 1
+    for r in regions_clean
+        for c in fd_cats
+            country_codes_fd[idx] = string(r)
+            fd_categories[idx] = string(c)
+            idx += 1
+        end
+    end
+    fd_col_indices = DataFrame(CountryCode = country_codes_fd, Category = fd_categories)
+
+    country_codes_va = Vector{String}(undef, n_regions_clean * length(va_cats))
+    va_categories = Vector{String}(undef, n_regions_clean * length(va_cats))
+    idx = 1
+    for r in regions_clean
+        for c in va_cats
+            country_codes_va[idx] = string(r)
+            va_categories[idx] = string(c)
+            idx += 1
+        end
+    end
+    va_row_indices = DataFrame(CountryCode = country_codes_va, Category = va_categories)
+
+    T_entry = MatrixEntry(Z_mat, t_row_indices, t_row_indices)
+    A_entry = MatrixEntry(A_mat, t_row_indices, t_row_indices)
+    FD_entry = MatrixEntry(Y, fd_col_indices, t_row_indices)
+    VA_entry = MatrixEntry(VA_mat, t_row_indices, va_row_indices)
+    X_entry = SeriesEntry(q, t_row_indices)
+
+    L_entry = calculate_leontief_factorization(A_entry)
+
+    # Empty EnvironmentalExtension as required by rule 4
+    empty_f_data = sparse(zeros(0, size(A_mat, 2)))
+    empty_row_indices = DataFrame(Stressor = String[], Source = String[])
+    empty_F = MatrixEntry(empty_f_data, t_row_indices, empty_row_indices)
+    empty_A = MatrixEntry(empty_f_data, t_row_indices, empty_row_indices)
+    env_entry = EnvironmentalExtension(empty_F, empty_A)
+
+    return MRIO(A_entry, T_entry, VA_entry, FD_entry, L_entry, X_entry, env_entry)
+end
+
+const _construct_IO = __construct_IO
+
+"""
+    parse_gloria(path::String, year::Int; version = 60, price = "bp", country_names = "gloria", construct = "B")
+
+Parses raw GLORIA SUT tables, reads Excel readme metadata, and constructs a complete MRIO database.
+"""
+function parse_gloria(path::String, year::Int; version = 60, price = "bp", country_names = "gloria", construct = "B")
+    sut_matrices = parse_gloria_sut(path, year; version = version, price = price == "bp" ? BasePrice() : PPrice())
+
+    # Find the readme file
+    readme_name = "GLORIA_ReadMe_0$(version).xlsx"
+    gloria_meta_path = joinpath(path, readme_name)
+    if !isfile(gloria_meta_path)
+        files = readdir(path)
+        matching = filter(f -> occursin(lowercase("ReadMe"), lowercase(f)) && endswith(lowercase(f), ".xlsx"), files)
+        if !isempty(matching)
+            gloria_meta_path = joinpath(path, matching[1])
+        else
+            throw(ParserError("Could not find GLORIA readme xlsx file in $path"))
+        end
+    end
+
+    # Regions
+    df_regions = DataFrame(XLSX.readtable(gloria_meta_path, "Regions"))
+    country_col = Symbol(country_names == "gloria" ? "Region_acronyms" : "Region_names")
+    regions = collect(skipmissing(df_regions[!, country_col]))
+
+    # Sectors
+    df_sectors = DataFrame(XLSX.readtable(gloria_meta_path, "Sectors"))
+    sectors = collect(skipmissing(df_sectors.Sector_names))
+
+    # Value added and final demand
+    df_va_fd = DataFrame(XLSX.readtable(gloria_meta_path, "Value added and final demand"))
+    va_cats = collect(skipmissing(df_va_fd.Value_added_names))
+    fd_cats = collect(skipmissing(df_va_fd.Final_demand_names))
+
+    return __construct_IO(sut_matrices, regions, sectors, va_cats, fd_cats; construct = construct)
 end
 
 end # Module End

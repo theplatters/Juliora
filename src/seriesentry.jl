@@ -32,15 +32,16 @@ julia> series.col_indices.Country
  "DEU"
 ```
 """
-struct SeriesEntry
-	data::Vector{Float64}
+struct SeriesEntry{T}
+	data::T
 	col_indices::DataFrame
     col_lookup::Dict{NamedTuple, Int}
-	function SeriesEntry(data, col_indices)
-        @assert length(data) == nrow(col_indices)
-		col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
-		new(data, col_indices, col_lookup)
-	end
+end
+
+function SeriesEntry(data::T, col_indices::DataFrame) where T
+	@assert length(data) == nrow(col_indices)
+	col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
+	return SeriesEntry{T}(data, col_indices, col_lookup)
 end
 
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)

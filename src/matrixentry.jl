@@ -48,19 +48,24 @@ julia> matrix_entry.row_indices.Country
  "DEU"
 ```
 """
-mutable struct MatrixEntry <: AbstractMatrixEntry
-	data::Matrix{Float64}
+mutable struct MatrixEntry{T <: AbstractMatrix{Float64}} <: AbstractMatrixEntry
+	data::T
 	col_indices::DataFrame
 	row_indices::DataFrame
 	row_lookup::Dict{NamedTuple, Int}
 	col_lookup::Dict{NamedTuple, Int}
-	function MatrixEntry(data, col_indices, row_indices)
-		@assert size(data) == (size(row_indices)[1], size(col_indices)[1]) "Data $(size(data)) dimensions must match index DataFrames $(size(row_indices)[1]), $(size(col_indices)[1])"
+end
 
-		row_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(row_indices)))
-		col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
-		new(data, col_indices, row_indices, row_lookup, col_lookup)
-	end
+function MatrixEntry(data::T, col_indices::DataFrame, row_indices::DataFrame) where T <: AbstractMatrix{Float64}
+	@assert size(data) == (size(row_indices)[1], size(col_indices)[1]) "Data $(size(data)) dimensions must match index DataFrames $(size(row_indices)[1]), $(size(col_indices)[1])"
+	row_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(row_indices)))
+	col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
+	return MatrixEntry{T}(data, col_indices, row_indices, row_lookup, col_lookup)
+end
+
+function MatrixEntry(data::AbstractMatrix, col_indices::DataFrame, row_indices::DataFrame)
+	data_float = convert(AbstractMatrix{Float64}, data)
+	return MatrixEntry(data_float, col_indices, row_indices)
 end
 
 

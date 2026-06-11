@@ -1,12 +1,12 @@
 using Test
 using Juliora
-import Juliora.PyMRIOParser as P
+import Juliora.Parser as P
 using SparseArrays
 using ZipArchives
 using Mmap
 using Random
 
-@testset "PyMRIOParser Parser Rules" begin
+@testset "Parser Parser Rules" begin
 
     @testset "find_row_starts" begin
         # 1. Valid inputs/syntax
@@ -359,4 +359,33 @@ end
     @test sp_oversized[1, 4] == 4.0
     @test sp_oversized[2, 1] == 3.0
     @test sp_oversized[2, 2] == 4.0
+end
+
+@testset "parse_gloria integration" begin
+    path = "data/GLORIA/2019"
+    year = 2019
+    version = 60
+    
+    mrio = P.parse_gloria(path, year; version=version)
+    
+    @test mrio isa IO.MRIO
+    @test mrio.A isa IO.MatrixEntry
+    @test mrio.T isa IO.MatrixEntry
+    @test mrio.VA isa IO.MatrixEntry
+    @test mrio.FD isa IO.MatrixEntry
+    @test mrio.L isa IO.LeontiefFactorization
+    @test mrio.X isa IO.SeriesEntry
+    @test mrio.env isa IO.EnvironmentalExtension
+    
+    # Verify dimensions for 164 regions, 120 sectors, 6 fd categories, 7 va categories
+    # The intermediate matrices after constructing symmetric IOT should be (164 * 120) x (164 * 120) = 19680 x 19680
+    @test size(mrio.T.data) == (19680, 19680)
+    @test size(mrio.A.data) == (19680, 19680)
+    @test size(mrio.FD.data) == (19680, 984) # 164 * 6 = 984 final demand columns
+    @test size(mrio.VA.data) == (1148, 19680) # 164 * 7 = 1148 value added rows
+    @test length(mrio.X.data) == 19680
+    
+    # Verify EnvironmentalExtension has empty matrices as requested by rule 4
+    @test size(mrio.env.F.data) == (0, 19680)
+    @test size(mrio.env.A.data) == (0, 19680)
 end

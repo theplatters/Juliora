@@ -1,7 +1,7 @@
 
 
-struct LeontiefFactorization <:AbstractMatrixEntry
-    factorization::LU{Float64, Matrix{Float64}, Vector{Int64}}
+struct LeontiefFactorization{F} <: AbstractMatrixEntry
+    factorization::F
     col_indices::DataFrame
     row_indices::DataFrame
 end
