@@ -189,6 +189,49 @@ using Random
                 write(w, "3.0,0.0\n")
             end
             @test_throws Exception P.parse_gloria_sut(tmpdir, year+2; version=version, price=price)
+
+            # 4. Unzipped Directory Parsing Tests
+            # Setup unzipped directory directly
+            unzipped_dir = joinpath(tmpdir, "GLORIA_MRIOs_$(version)_$(year)")
+            mkpath(unzipped_dir)
+            write(joinpath(unzipped_dir, t_file), "1.0,0.0\n0.0,2.0\n")
+            write(joinpath(unzipped_dir, y_file), "3.0,0.0\n0.0,4.0\n")
+            write(joinpath(unzipped_dir, va_file), "5.0,0.0\n0.0,6.0\n")
+
+            # Test explicit is_unzipped = true with direct directory path
+            sut_unzipped1 = P.parse_gloria_sut(unzipped_dir, year, true; version=version, price=price)
+            @test sut_unzipped1 isa Dict{String, SparseMatrixCSC{Float64, Int}}
+            @test sut_unzipped1["T"] == sparse([1.0 0.0; 0.0 2.0])
+            @test sut_unzipped1["Y"] == sparse([3.0 0.0; 0.0 4.0])
+            @test sut_unzipped1["VA"] == sparse([5.0 0.0; 0.0 6.0])
+
+            # Test explicit is_unzipped = true with parent directory path
+            sut_unzipped2 = P.parse_gloria_sut(tmpdir, year, true; version=version, price=price)
+            @test sut_unzipped2 isa Dict{String, SparseMatrixCSC{Float64, Int}}
+            @test sut_unzipped2["T"] == sparse([1.0 0.0; 0.0 2.0])
+
+            # Test automatic detection (fallback) when zip file does not exist
+            # Create a new year for testing fallback without a zip file
+            year_auto = year + 4
+            t_file_auto = "20260121_120secMother_AllCountries_002_T-Results_$(year_auto)_0$(version)_$(ext).csv"
+            y_file_auto = "20260121_120secMother_AllCountries_002_Y-Results_$(year_auto)_0$(version)_$(ext).csv"
+            va_file_auto = "20260121_120secMother_AllCountries_002_V-Results_$(year_auto)_0$(version)_$(ext).csv"
+
+            unzipped_dir_auto = joinpath(tmpdir, "GLORIA_MRIOs_$(version)_$(year_auto)")
+            mkpath(unzipped_dir_auto)
+            write(joinpath(unzipped_dir_auto, t_file_auto), "1.0,0.0\n0.0,2.0\n")
+            write(joinpath(unzipped_dir_auto, y_file_auto), "3.0,0.0\n0.0,4.0\n")
+            write(joinpath(unzipped_dir_auto, va_file_auto), "5.0,0.0\n0.0,6.0\n")
+
+            # Since no zip file exists for year_auto in tmpdir, it should detect and parse the unzipped directory
+            sut_auto = P.parse_gloria_sut(tmpdir, year_auto; version=version, price=price)
+            @test sut_auto isa Dict{String, SparseMatrixCSC{Float64, Int}}
+            @test sut_auto["T"] == sparse([1.0 0.0; 0.0 2.0])
+            @test sut_auto["Y"] == sparse([3.0 0.0; 0.0 4.0])
+            @test sut_auto["VA"] == sparse([5.0 0.0; 0.0 6.0])
+
+            # Test non-existent unzipped directory path throws exception
+            @test_throws Exception P.parse_gloria_sut(joinpath(tmpdir, "does_not_exist"), year, true; version=version, price=price)
         end
     end
 

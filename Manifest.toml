@@ -1213,7 +1213,7 @@ uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
 
 [[deps.Juliora]]
-deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "SparseArrays", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
+deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "SparseArrays", "Statistics", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
 path = "."
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
 version = "0.1.0"

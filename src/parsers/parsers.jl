@@ -285,6 +285,34 @@ Extracts compressed files into byte vectors and initializes the sparse compiler.
 """
 function read_csv_to_sparse_matrix(zip_reader::za.ZipReader, filename::String)
     raw_data = za.zip_readentry(zip_reader, filename)
+    return parse_raw_bytes_to_sparse_matrix(raw_data)
+end
+
+"""
+    read_csv_to_sparse_matrix(filepath::String)
+
+Reads a CSV file directly from disk (using memory-mapping) and compiles it into a sparse matrix.
+"""
+function read_csv_to_sparse_matrix(filepath::String)
+    if !isfile(filepath)
+        throw(ParserError("File not found: $filepath"))
+    end
+
+    io = open(filepath, "r")
+    try
+        raw_data = Mmap.mmap(io, Vector{UInt8})
+        return parse_raw_bytes_to_sparse_matrix(raw_data)
+    finally
+        close(io)
+    end
+end
+
+"""
+    parse_raw_bytes_to_sparse_matrix(raw_data::Vector{UInt8})
+
+Internal helper to compile a raw byte vector of CSV data into a SparseMatrixCSC.
+"""
+function parse_raw_bytes_to_sparse_matrix(raw_data::Vector{UInt8})
     len = length(raw_data)
 
     if len == 0
@@ -336,26 +364,78 @@ function parse_gloria_sut(path::String, year::Int; version = 60, price::Abstract
 
     gloria_path = joinpath(path, "GLORIA_MRIOs_$(version)_$year.zip")
 
+    # If the zip file does not exist, but we detect files/directories that look unzipped, fallback to unzipped.
+    if !isfile(gloria_path)
+        first_file = gloria_mrio_files[1].second
+        if isdir(path) && (isfile(joinpath(path, first_file)) || isdir(joinpath(path, "GLORIA_MRIOs_$(version)_$year")))
+            @info "GLORIA zip file not found, but unzipped directory exists. Fallback to unzipped parsing."
+            return parse_gloria_sut(path, year, true; version = version, price = price)
+        end
+    end
+
     io = open(gloria_path, "r")
     mmap_data = Mmap.mmap(io)
     gloria_zip = za.ZipReader(mmap_data)
 
     sut_matrices = Dict{String, SparseMatrixCSC{Float64, Int}}()
 
-    GC.@preserve mmap_data begin
-        for (k, v) in gloria_mrio_files
-            println("Streaming and parsing $k...")
-            # Fixed bug: Captured the return values inside your state tracking dictionary
-            sut_matrices[k] = read_csv_to_sparse_matrix(gloria_zip, v)
-            @info "$k parsed successfully"
+    for (k, v) in gloria_mrio_files
+        println("Streaming and parsing $k...")
+        sut_matrices[k] = read_csv_to_sparse_matrix(gloria_zip, v)
+        @info "$k parsed successfully"
 
-            # Explicitly clear space after every major structural ingestion loop
-            GC.gc()
-        end
+        # Explicitly clear space after every major structural ingestion loop
     end
 
     close(io)
-    GC.gc()
+
+    return sut_matrices
+end
+
+"""
+    parse_gloria_sut(path::String, year::Int, is_unzipped::Bool; version = 60, price::AbstractPrice = BasePrice())
+
+Reads GLORIA SUT matrices from an unzipped directory.
+If `is_unzipped` is true, this method expects the files to be located in `path` or `path/GLORIA_MRIOs_\$(version)_\$(year)`.
+"""
+function parse_gloria_sut(path::String, year::Int, is_unzipped::Bool; version = 60, price::AbstractPrice = BasePrice())
+    if !is_unzipped
+        return parse_gloria_sut(path, year; version = version, price = price)
+    end
+
+    extension = get_extention(price)
+
+    gloria_mrio_files = (
+        "T" => "20260121_120secMother_AllCountries_002_T-Results_$(year)_0$(version)_$(extension).csv",
+        "Y" => "20260121_120secMother_AllCountries_002_Y-Results_$(year)_0$(version)_$(extension).csv",
+        "VA" => "20260121_120secMother_AllCountries_002_V-Results_$(year)_0$(version)_$(extension).csv",
+    )
+
+    # Determine unzipped directory path
+    dir_path = path
+    if !isdir(dir_path)
+        throw(ParserError("Path is not a directory: $dir_path"))
+    end
+
+    first_file = gloria_mrio_files[1].second
+    if !isfile(joinpath(dir_path, first_file))
+        subdir = joinpath(path, "GLORIA_MRIOs_$(version)_$year")
+        if isdir(subdir) && isfile(joinpath(subdir, first_file))
+            dir_path = subdir
+        else
+            throw(ParserError("Could not find GLORIA SUT files in $path or $subdir"))
+        end
+    end
+
+    sut_matrices = Dict{String, SparseMatrixCSC{Float64, Int}}()
+
+    for (k, v) in gloria_mrio_files
+        filepath = joinpath(dir_path, v)
+        println("Streaming and parsing $k from $filepath...")
+        sut_matrices[k] = read_csv_to_sparse_matrix(filepath)
+        @info "$k parsed successfully"
+    end
+
 
     return sut_matrices
 end
