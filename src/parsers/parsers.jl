@@ -8,9 +8,9 @@ using Mmap
 using Parsers
 using SparseArrays # Crucial for low-RAM high-performance processing
 using XLSX
-import ..Juliora: MRIO, MatrixEntry, SeriesEntry, LeontiefFactorization, EnvironmentalExtension, calculate_leontief_factorization
+import ..Juliora: MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, calculate_leontief_factorization
 
-export ParserError, ParserWarning, parse_gloria, parse_gloria_sut, __construct_IO
+export ParserError, ParserWarning, parse_gloria, parse_gloria_sut, _construct_IO
 
 # Custom Exceptions
 struct ParserError <: Exception
@@ -381,23 +381,22 @@ function parse_gloria_sut(path::String, year::Int; version = 60, price::Abstract
         end
     end
 
-    io = open(gloria_path, "r")
-    mmap_data = Mmap.mmap(io)
-    gloria_zip = za.ZipReader(mmap_data)
+    return open(gloria_path, "r") do io
+        mmap_data = Mmap.mmap(io)
+        gloria_zip = za.ZipReader(mmap_data)
 
-    sut_matrices = Dict{String, SparseMatrixCSC{Float64, Int}}()
+        sut_matrices = Dict{String, SparseMatrixCSC{Float64, Int}}()
 
-    for (k, v) in gloria_mrio_files
-        println("Streaming and parsing $k...")
-        sut_matrices[k] = read_csv_to_sparse_matrix(gloria_zip, v)
-        @info "$k parsed successfully"
+        for (k, v) in gloria_mrio_files
+            println("Streaming and parsing $k...")
+            sut_matrices[k] = read_csv_to_sparse_matrix(gloria_zip, v)
+            @info "$k parsed successfully"
 
-        # Explicitly clear space after every major structural ingestion loop
-    end
+            # Explicitly clear space after every major structural ingestion loop
+        end
 
-    close(io)
-
-    return sut_matrices
+        return sut_matrices
+    end |> extract_sut
 end
 
 """
@@ -444,54 +443,12 @@ function parse_gloria_sut(path::String, year::Int, is_unzipped::Bool; version = 
         @info "$k parsed successfully"
     end
 
+    return extract_sut(sut_matrices)
 
-    return sut_matrices
+
 end
 
-"""
-    __construct_IO(data_sut::Dict{String, SparseMatrixCSC{Float64, Int}}; construct="B")
-
-Runs low-RAM matrix transformations directly on sparse structures.
-"""
-function __construct_IO(data_sut::Dict{String, SparseMatrixCSC{Float64, Int}}; construct = "B")
-    V = data_sut["VA"]
-    U = data_sut["T"]
-
-    # Summing across a sparse matrix row dimensions returns a predictable dense 2D column array
-    g = vec(sum(V, dims = 2))
-    g_inv = map(x -> x == 0.0 ? 0.0 : 1.0 / x, g)
-
-    if construct == "B"
-        # Row-wise vector broadcasting (.*) against a SparseMatrixCSC scales
-        # non-zero elements in-place while perfectly maintaining original matrix structure.
-        T_matrix = g_inv .* V
-
-        # Sparse * Sparse Matrix Multiplication (Native, extremely quick, runs in O(nnz) RAM)
-        A_mat = U * T_matrix
-
-        return Dict{String, SparseMatrixCSC{Float64, Int}}("A" => A_mat)
-    else
-        throw(ArgumentError("Unsupported construction type: $construct"))
-    end
-end
-
-"""
-    __construct_IO(sut_matrices::Dict{String, SparseMatrixCSC{Float64, Int}}, regions::Vector, sectors::Vector, va_cats::Vector, fd_cats::Vector; construct = "B")
-
-Constructs the symmetric input-output matrices and indices, returning a complete MRIO struct.
-"""
-function __construct_IO(
-    sut_matrices::Dict{String, SparseMatrixCSC{Float64, Int}},
-    regions::Vector,
-    sectors::Vector,
-    va_cats::Vector,
-    fd_cats::Vector;
-    construct = "B"
-)
-    if construct != "B"
-        throw(ArgumentError("Unsupported construction type: $construct"))
-    end
-
+function extract_sut(sut_matrices)
     T_raw = sut_matrices["T"]
     Y_raw = sut_matrices["Y"]
     VA_raw = sut_matrices["VA"]
@@ -503,15 +460,39 @@ function __construct_IO(
     product_mask = fill(false, n_regions * 2 * n_sectors)
     for r in 1:n_regions
         base = (r - 1) * 2 * n_sectors
-        industry_mask[base + 1 : base + n_sectors] .= true
-        product_mask[base + n_sectors + 1 : base + 2 * n_sectors] .= true
+        industry_mask[(base + 1):(base + n_sectors)] .= true
+        product_mask[(base + n_sectors + 1):(base + 2 * n_sectors)] .= true
     end
 
-    V = T_raw[industry_mask, product_mask]
-    U = T_raw[product_mask, industry_mask]
-    Y = Y_raw[product_mask, :]
-    VA = VA_raw[:, industry_mask]
+    V = T_raw[industry_mask, product_mask] |> Matrix
+    U = T_raw[product_mask, industry_mask] |> Matrix
+    Y = Y_raw[product_mask, :] |> Matrix
+    VA = VA_raw[:, industry_mask] |> Matrix
 
+
+    @info "Created masks, with dimensions $(size(V)) type $(typeof(V))"
+
+
+    return (V, U, Y, VA)
+
+end
+
+
+"""
+    _construct_IO(sut_matrices::Dict{String, SparseMatrixCSC{Float64, Int}}, regions::Vector, sectors::Vector, va_cats::Vector, fd_cats::Vector)
+
+Constructs the symmetric input-output matrices and indices, returning a complete MRIO struct.
+"""
+function _construct_IO(
+        V, U, Y, VA,
+        regions::Vector,
+        sectors::Vector,
+        va_cats::Vector,
+        fd_cats::Vector
+    )
+
+    n_regions = 164
+    n_sectors = 120
     # Industry output (row sum of V)
     g = vec(sum(V, dims = 2))
     g_inv = map(x -> x == 0.0 ? 0.0 : 1.0 / x, g)
@@ -619,12 +600,15 @@ function __construct_IO(
     end
     va_row_indices = DataFrame(CountryCode = country_codes_va, Category = va_categories)
 
+    @info "Constructing Matrix Entries"
     T_entry = MatrixEntry(Z_mat, t_row_indices, t_row_indices)
     A_entry = MatrixEntry(A_mat, t_row_indices, t_row_indices)
     FD_entry = MatrixEntry(Y, fd_col_indices, t_row_indices)
     VA_entry = MatrixEntry(VA_mat, t_row_indices, va_row_indices)
     X_entry = SeriesEntry(q, t_row_indices)
 
+
+    @info "Calculating Leontief"
     L_entry = calculate_leontief_factorization(A_entry)
 
     # Empty EnvironmentalExtension as required by rule 4
@@ -637,15 +621,14 @@ function __construct_IO(
     return MRIO(A_entry, T_entry, VA_entry, FD_entry, L_entry, X_entry, env_entry)
 end
 
-const _construct_IO = __construct_IO
 
 """
     parse_gloria(path::String, year::Int; version = 60, price = "bp", country_names = "gloria", construct = "B")
 
 Parses raw GLORIA SUT tables, reads Excel readme metadata, and constructs a complete MRIO database.
 """
-function parse_gloria(path::String, year::Int; version = 60, price = "bp", country_names = "gloria", construct = "B")
-    sut_matrices = parse_gloria_sut(path, year; version = version, price = price == "bp" ? BasePrice() : PPrice())
+function parse_gloria(path::String, year::Int; version = 60, price = "bp", country_names = "gloria")
+    (V, U, Y, VA) = parse_gloria_sut(path, year; version = version, price = price == "bp" ? BasePrice() : PPrice())
 
     # Find the readme file
     readme_name = "GLORIA_ReadMe_0$(version).xlsx"
@@ -674,7 +657,8 @@ function parse_gloria(path::String, year::Int; version = 60, price = "bp", count
     va_cats = collect(skipmissing(df_va_fd.Value_added_names))
     fd_cats = collect(skipmissing(df_va_fd.Final_demand_names))
 
-    return __construct_IO(sut_matrices, regions, sectors, va_cats, fd_cats; construct = construct)
+    @info "Constructing MRIO"
+    return _construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats)
 end
 
 end # Module End
