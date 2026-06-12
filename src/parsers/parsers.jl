@@ -112,27 +112,19 @@ function custom_gloria_sparse_parser(::Serial, raw_bytes::Vector{UInt8}, len::In
     return construct_sparse_from_row_major(I, J, V, nrows, ncols)
 end
 
-function emplace!(A, i, j, pos, res)
 
-    if Parsers.ok(res.code)
-        A[i, j] = res.val
-        pos += res.tlen
-    else
-        pos += 1
-    end
-    return pos
+function global_to_local_industry(global_idx::Int, n_sectors::Int)
+    region = (global_idx - 1) ÷ (2 * n_sectors)
+    rem = (global_idx - 1) % (2 * n_sectors)
+
+    return (region * n_sectors) + rem + 1
 end
 
-@inline function global_to_local_idx(global_idx::Int)
-    # Determine which region block we are in (1-indexed)
-    region_block = (global_idx - 1) ÷ (2 * N_SECTORS)
+function global_to_local_product(global_idx::Int, n_sectors::Int)
+    region = (global_idx - 1) ÷ (2 * n_sectors)
+    rem = (global_idx - 1) % (2 * n_sectors)
 
-    # Find the position relative to the start of this region's block
-    rem_idx = (global_idx - 1) % (2 * N_SECTORS)
-
-    # Map the index back down to a consolidated continuous index
-    local_idx = (region_block * N_SECTORS) + (rem_idx % N_SECTORS) + 1
-    return local_idx
+    return (region * n_sectors) + (rem - n_sectors) + 1
 end
 
 function parse(::TFile, raw_bytes::Vector{UInt8}; delim::Char = ',')
@@ -149,32 +141,36 @@ function parse(::TFile, raw_bytes::Vector{UInt8}; delim::Char = ',')
     product_mask = .!industry_mask  # Product mask is just the exact inverse
 
 
-    for i in 1:nrows
+    Threads.@threads for i in 1:nrows
         pos = row_starts[i]
-        local_i = global_to_local_idx(i)
+        is_ind_i = industry_mask[i]
+
+        # Pre-calculate row local destination based on identity
+        local_i = is_ind_i ?
+            global_to_local_industry(i, N_SECTORS) :
+            global_to_local_product(i, N_SECTORS)
+
         for j in 1:ncols
             while pos <= len && (is_delim_or_newline(raw_bytes[pos], delim_byte))
                 pos += 1
             end
 
-
             res = Parsers.xparse(Float64, raw_bytes, pos, len, opts)
+            is_ind_j = industry_mask[j]
 
-            local_j = global_to_local_idx(j)
-            if (industry_mask[i] && product_mask[j])
+            if is_ind_i && !is_ind_j  # Industry row, Product col -> Matrix S
+                local_j = global_to_local_product(j, N_SECTORS)
                 if Parsers.ok(res.code)
                     S[local_i, local_j] = res.val
                 end
-                pos += res.tlen
-            elseif (product_mask[i] && industry_mask[j])
+            elseif !is_ind_i && is_ind_j # Product row, Industry col -> Matrix U
+                local_j = global_to_local_industry(j, N_SECTORS)
                 if Parsers.ok(res.code)
                     U[local_i, local_j] = res.val
                 end
-                pos += res.tlen
-            else
-                pos += res.tlen
             end
 
+            pos += res.tlen
         end
     end
 
@@ -212,10 +208,11 @@ function parse(::VAFile, raw_data::Vector{UInt8})
     product_mask = .!industry_mask  # Product mask is just the exact inverse
 
 
-    for i in 1:nrows
-        product_mask[i] && continue
+    Threads.@threads  for i in 1:nrows
         pos = row_starts[i]
         for j in 1:ncols
+
+
             while pos <= len && is_delim_or_newline(raw_data[pos], delim_byte)
                 pos += 1
             end
@@ -228,11 +225,12 @@ function parse(::VAFile, raw_data::Vector{UInt8})
             end
 
             res = Parsers.xparse(Float64, raw_data, pos, len, opts)
-            if Parsers.ok(res.code)
-                A[i, j] = res.val
+            if Parsers.ok(res.code) && product_mask[j]
+                local_j = global_to_local_industry(j, N_SECTORS)
+                A[i, local_j] = res.val
                 pos += res.tlen
             else
-                pos += 1
+                pos += res.tlen
             end
         end
     end
@@ -282,7 +280,10 @@ function parse(::YFile, raw_data::Vector{UInt8})
 
             res = Parsers.xparse(Float64, raw_data, pos, len, opts)
             if Parsers.ok(res.code)
-                A[i, j] = res.val
+
+                local_i = global_to_local_product(j, N_SECTORS)
+                A[local_i, j] = res.val
+
                 pos += res.tlen
             else
                 pos += 1
