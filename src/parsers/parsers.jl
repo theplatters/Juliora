@@ -312,8 +312,12 @@ function parse_gloria_sut(path::String; year::Integer = 2019, version::Integer =
     extension = get_extention(price)
 
 
+    @info "Parsing T"
     S, U = read(TFile(), joinpath(path, "20260121_120secMother_AllCountries_002_T-Results_$(year)_0$(version)_$(extension).csv"))
+    @info "Parsing Y"
     Y = read(YFile(), joinpath(path, "20260121_120secMother_AllCountries_002_Y-Results_$(year)_0$(version)_$(extension).csv"))
+
+    @info "Parsing VA"
     VA = read(VAFile(), joinpath(path, "20260121_120secMother_AllCountries_002_V-Results_$(year)_0$(version)_$(extension).csv"))
     return (S, U, Y, VA)
 end
