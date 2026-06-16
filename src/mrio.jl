@@ -118,6 +118,15 @@ function Eora(path::String)
     )
 end
 
+"""
+    Gloria(path::String, version::Integer, year::Integer)
+
+Load and construct complete Gloria MRIO database from file directory.
+"""
+function Gloria(path::String, version::Integer, year::Integer)
+    return Parser.parse_gloria(path, year; version = version)
+end
+
 
 calculate_leontief_inverse(a::MatrixEntry) = MatrixEntry(inv(I - a.data), a.col_indices, a.row_indices)
 calculate_technical_coefficients(T::MatrixEntry, x) = MatrixEntry(T.data ./ replace(x, 0.0 => 1.0)', T.col_indices, T.row_indices)
