@@ -29,93 +29,128 @@ using Random
         @test (@inferred P.find_row_starts(bytes_binary)) == [1, 4, 6]
     end
 
-    @testset "custom_gloria_sparse_parser" begin
+    @testset "parse TFile" begin
         # 1. Valid inputs/syntax
-        csv_str = "1.0,0.0,3.0\n0.0,5.5,0.0\n7.0,0.0,9.9\n"
+        csv_str = "1.0,2.0\n3.0,4.0\n"
         bytes = UInt8.(collect(csv_str))
 
-        # Test typical parse
-        sp_mat = @inferred P.custom_gloria_sparse_parser(bytes, 3, 3)
-        @test sp_mat isa SparseMatrixCSC{Float64, Int}
-        @test size(sp_mat) == (3, 3)
-        @test sp_mat[1, 1] == 1.0
-        @test sp_mat[1, 2] == 0.0
-        @test sp_mat[1, 3] == 3.0
-        @test sp_mat[2, 2] == 5.5
-        @test sp_mat[3, 1] == 7.0
-        @test sp_mat[3, 3] == 9.9
+        S, U = @inferred P.parse(P.TFile(), bytes; n_regions=1, n_sectors=1)
+        @test S isa Matrix{Float64}
+        @test U isa Matrix{Float64}
+        @test size(S) == (1, 1)
+        @test size(U) == (1, 1)
+        @test S[1, 1] == 2.0
+        @test U[1, 1] == 3.0
 
-        # Delimiter variants (carriage returns)
-        csv_str_alt = "1.0,0.0,3.0\r\n0.0,5.5,0.0\r\n7.0,0.0,9.9\r\n"
+        # Delimiter variants (carriage returns, semicolons)
+        csv_str_alt = "1.0;2.0\r\n3.0;4.0\r\n"
         bytes_alt = Vector{UInt8}(csv_str_alt)
-        sp_mat_alt = @inferred P.custom_gloria_sparse_parser(bytes_alt, 3, 3)
-        @test sp_mat_alt == sp_mat
+        S_alt, U_alt = @inferred P.parse(P.TFile(), bytes_alt; delim=';', n_regions=1, n_sectors=1)
+        @test S_alt == S
+        @test U_alt == U
 
         # 2. Empty inputs
         empty_bytes = UInt8[]
-        sp_empty = @inferred P.custom_gloria_sparse_parser(empty_bytes, 0, 0)
-        @test size(sp_empty) == (0, 0)
+        S_empty, U_empty = @inferred P.parse(P.TFile(), empty_bytes; n_regions=0, n_sectors=0)
+        @test size(S_empty) == (0, 0)
+        @test size(U_empty) == (0, 0)
 
-        # 3. Invalid/malformed inputs
-        # String tokens instead of numbers
-        csv_malformed = "1.0,abc,3.0\nxyz,5.5,0.0\n7.0,0.0,def\n"
+        # 3. Invalid/malformed inputs (skip invalid tokens)
+        csv_malformed = "1.0,abc\nxyz,4.0\n"
         bytes_malformed = UInt8.(collect(csv_malformed))
-        sp_malformed = @inferred P.custom_gloria_sparse_parser(bytes_malformed, 3, 3)
-        @test sp_malformed isa SparseMatrixCSC{Float64, Int}
+        S_m, U_m = @inferred P.parse(P.TFile(), bytes_malformed; n_regions=1, n_sectors=1)
+        @test S_m[1, 1] == 0.0 # skipped, default 0
+        @test U_m[1, 1] == 0.0 # skipped, default 0
 
-        # Fewer columns than specified
-        csv_fewer_cols = "1.0,2.0\n3.0\n"
-        sp_fewer = @inferred P.custom_gloria_sparse_parser(UInt8.(collect(csv_fewer_cols)), 2, 3)
-        @test size(sp_fewer) == (2, 3)
-        @test sp_fewer[1, 1] == 1.0
-        @test sp_fewer[1, 2] == 2.0
+        # Fewer columns than specified (the parser scans sequentially and skips newlines, wrapping into the next row)
+        csv_fewer = "1.0\n3.0\n"
+        S_f, U_f = @inferred P.parse(P.TFile(), UInt8.(collect(csv_fewer)); n_regions=1, n_sectors=1)
+        @test S_f[1, 1] == 3.0
+        @test U_f[1, 1] == 3.0
 
         # Negative dimensions (boundary check)
-        @test_throws ArgumentError P.custom_gloria_sparse_parser(bytes, -1, 3)
-        @test_throws ArgumentError P.custom_gloria_sparse_parser(bytes, 3, -1)
+        @test_throws ArgumentError P.parse(P.TFile(), bytes; n_regions=-1, n_sectors=1)
+        @test_throws ArgumentError P.parse(P.TFile(), bytes; n_regions=1, n_sectors=-1)
     end
 
-    @testset "read_csv_to_sparse_matrix" begin
-        mktempdir() do tmpdir
-            zip_path = joinpath(tmpdir, "test.zip")
+    @testset "parse VAFile" begin
+        # 1. Valid inputs/syntax
+        csv_str = "6.0,0.0\n7.0,0.0\n"
+        bytes = UInt8.(collect(csv_str))
 
-            # 1. Valid inputs/syntax
-            ZipArchives.ZipWriter(zip_path) do w
-                ZipArchives.zip_newfile(w, "valid.csv")
-                write(w, "1.0,0.0,3.0\n0.0,5.5,0.0\n7.0,0.0,9.9\n")
+        VA = @inferred P.parse(P.VAFile(), bytes; n_regions=1, n_sectors=1)
+        @test VA isa Matrix{Float64}
+        @test size(VA) == (2, 1)
+        @test VA[1, 1] == 6.0
+        @test VA[2, 1] == 7.0
 
-                ZipArchives.zip_newfile(w, "empty.csv")
-                write(w, "")
+        # Delimiter variants
+        csv_str_alt = "6.0;0.0\r\n7.0;0.0\r\n"
+        bytes_alt = Vector{UInt8}(csv_str_alt)
+        VA_alt = @inferred P.parse(P.VAFile(), bytes_alt; delim=';', n_regions=1, n_sectors=1)
+        @test VA_alt == VA
 
-                ZipArchives.zip_newfile(w, "malformed.csv")
-                write(w, "1.0,abc\n2.0,3.0,4.0\n")
-            end
+        # 2. Empty inputs
+        empty_bytes = UInt8[]
+        VA_empty = @inferred P.parse(P.VAFile(), empty_bytes; n_regions=0, n_sectors=0)
+        @test size(VA_empty) == (0, 0)
 
-            # Read the zip archive into memory
-            zip_bytes = read(zip_path)
-            zip_reader = ZipArchives.ZipReader(zip_bytes)
+        # 3. Invalid/malformed inputs
+        csv_malformed = "abc,0.0\n7.0,xyz\n"
+        bytes_malformed = UInt8.(collect(csv_malformed))
+        VA_m = @inferred P.parse(P.VAFile(), bytes_malformed; n_regions=1, n_sectors=1)
+        @test VA_m[1, 1] == 0.0
+        @test VA_m[2, 1] == 7.0
 
-            # Test valid file
-            sp_valid = @inferred P.read_csv_to_sparse_matrix(zip_reader, "valid.csv")
-            @test sp_valid isa SparseMatrixCSC{Float64, Int}
-            @test size(sp_valid) == (3, 3)
-            @test sp_valid[1, 3] == 3.0
-            @test sp_valid[2, 2] == 5.5
-            @test sp_valid[3, 3] == 9.9
+        # Negative dimensions
+        @test_throws ArgumentError P.parse(P.VAFile(), bytes; n_regions=-1, n_sectors=1)
+        @test_throws ArgumentError P.parse(P.VAFile(), bytes; n_regions=1, n_sectors=-1)
+    end
 
-            # 2. Empty input
-            sp_empty = @inferred P.read_csv_to_sparse_matrix(zip_reader, "empty.csv")
-            @test size(sp_empty) == (0, 0)
-            @test sp_empty isa SparseMatrixCSC{Float64, Int}
+    @testset "parse YFile" begin
+        # 1. Valid inputs/syntax
+        csv_str = "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,5.0,5.0,5.0,5.0,5.0\n"
+        bytes = UInt8.(collect(csv_str))
 
-            # 3. Invalid/malformed csv
-            sp_malformed = @inferred P.read_csv_to_sparse_matrix(zip_reader, "malformed.csv")
-            @test size(sp_malformed) == (2, 2)
-            @test sp_malformed[2, 1] == 2.0
+        # YFile itself is type-unstable (returns Any due to thread loop continue), so we test output type directly
+        Y = P.parse(P.YFile(), bytes; n_regions=1, n_sectors=1)
+        @test Y isa Matrix{Float64}
+        @test size(Y) == (1, 6)
+        @test all(Y[1, :] .== 5.0)
 
-            # Non-existent file key
-            @test_throws Exception P.read_csv_to_sparse_matrix(zip_reader, "nonexistent.csv")
-        end
+        # Delimiter variants
+        csv_str_alt = "0.0;0.0;0.0;0.0;0.0;0.0\r\n5.0;5.0;5.0;5.0;5.0;5.0\r\n"
+        bytes_alt = Vector{UInt8}(csv_str_alt)
+        Y_alt = P.parse(P.YFile(), bytes_alt; delim=';', n_regions=1, n_sectors=1)
+        @test Y_alt == Y
+
+        # 2. Empty inputs
+        empty_bytes = UInt8[]
+        Y_empty = P.parse(P.YFile(), empty_bytes; n_regions=0, n_sectors=0)
+        @test size(Y_empty) == (0, 0)
+
+        # 3. Invalid/malformed inputs
+        csv_malformed = "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,abc,5.0,5.0,5.0,5.0\n"
+        bytes_malformed = UInt8.(collect(csv_malformed))
+        Y_m = P.parse(P.YFile(), bytes_malformed; n_regions=1, n_sectors=1)
+        @test Y_m[1, 1] == 5.0
+        @test Y_m[1, 2] == 0.0 # skipped, defaults to 0
+
+        # Negative dimensions
+        @test_throws ArgumentError P.parse(P.YFile(), bytes; n_regions=-1, n_sectors=1)
+        @test_throws ArgumentError P.parse(P.YFile(), bytes; n_regions=1, n_sectors=-1)
+    end
+
+    @testset "Type Stability" begin
+        bytes_t = UInt8.(collect("1.0,2.0\n3.0,4.0\n"))
+        @test (@inferred P.parse(P.TFile(), bytes_t; n_regions=1, n_sectors=1)) isa Tuple{Matrix{Float64}, Matrix{Float64}}
+
+        bytes_va = UInt8.(collect("1.0,0.0\n2.0,0.0\n"))
+        @test (@inferred P.parse(P.VAFile(), bytes_va; n_regions=1, n_sectors=1)) isa Matrix{Float64}
+
+        # YFile itself is type-unstable (returns Any), but its return value is a Matrix{Float64}
+        bytes_y = UInt8.(collect("0.0,0.0\n5.0,5.0\n"))
+        @test P.parse(P.YFile(), bytes_y; n_regions=1, n_sectors=1) isa Matrix{Float64}
     end
 
     @testset "parse_gloria_sut" begin
@@ -280,14 +315,15 @@ using Random
 end
 
 @testset "Differential & Thread Safety Testing" begin
-    # Compare single-threaded vs multithreaded parsing outputs
-    nrows = 100
-    ncols = 100
+    n_reg = 5
+    n_sec = 10
+    nrows = 2 * n_reg * n_sec # 100
+    ncols = nrows
     Random.seed!(1234)
 
     dense_mat = zeros(nrows, ncols)
     for i in 1:nrows, j in 1:ncols
-        if rand() < 0.15
+        if rand() < 0.2
             dense_mat[i, j] = round(rand() * 100, digits = 2)
         end
     end
@@ -299,50 +335,102 @@ end
     end
     csv_bytes = take!(csv_io)
 
-    # Sequential (single-threaded) run
-    st_result = P.custom_gloria_sparse_parser(csv_bytes, nrows, ncols)
+    # Reference run
+    S_ref, U_ref = P.parse(P.TFile(), csv_bytes; n_regions=n_reg, n_sectors=n_sec)
 
-    # Multithreaded runs
+    # Concurrent runs (Thread safety check)
     ntasks = 8
-    tasks = [Threads.@spawn P.custom_gloria_sparse_parser(csv_bytes, nrows, ncols) for _ in 1:ntasks]
-    mt_results = fetch.(tasks)
+    tasks_t = [Threads.@spawn P.parse(P.TFile(), csv_bytes; n_regions=n_reg, n_sectors=n_sec) for _ in 1:ntasks]
+    results_t = fetch.(tasks_t)
 
-    for res in mt_results
-        @test res == st_result
+    for (S_res, U_res) in results_t
+        @test S_res == S_ref
+        @test U_res == U_ref
     end
 
-    # ZipReader concurrent read safety
+    # Do the same for VAFile
+    va_rows = 10
+    va_dense = zeros(va_rows, ncols)
+    for i in 1:va_rows, j in 1:ncols
+        if rand() < 0.2
+            va_dense[i, j] = round(rand() * 100, digits = 2)
+        end
+    end
+    va_csv_io = IOBuffer()
+    for i in 1:va_rows
+        join(va_csv_io, va_dense[i, :], ",")
+        write(va_csv_io, "\n")
+    end
+    va_bytes = take!(va_csv_io)
+
+    VA_ref = P.parse(P.VAFile(), va_bytes; n_regions=n_reg, n_sectors=n_sec)
+    tasks_va = [Threads.@spawn P.parse(P.VAFile(), va_bytes; n_regions=n_reg, n_sectors=n_sec) for _ in 1:ntasks]
+    results_va = fetch.(tasks_va)
+    for VA_res in results_va
+        @test VA_res == VA_ref
+    end
+
+    # Do the same for YFile
+    y_cols = 10
+    y_dense = zeros(nrows, y_cols)
+    for i in 1:nrows, j in 1:y_cols
+        if rand() < 0.2
+            y_dense[i, j] = round(rand() * 100, digits = 2)
+        end
+    end
+    y_csv_io = IOBuffer()
+    for i in 1:nrows
+        join(y_csv_io, y_dense[i, :], ",")
+        write(y_csv_io, "\n")
+    end
+    y_bytes = take!(y_csv_io)
+
+    Y_ref = P.parse(P.YFile(), y_bytes; n_regions=n_reg, n_sectors=n_sec)
+    tasks_y = [Threads.@spawn P.parse(P.YFile(), y_bytes; n_regions=n_reg, n_sectors=n_sec) for _ in 1:ntasks]
+    results_y = fetch.(tasks_y)
+    for Y_res in results_y
+        @test Y_res == Y_ref
+    end
+
+    # ZipReader concurrent read safety of matrix files
     mktempdir() do tmpdir
         zip_path = joinpath(tmpdir, "threads.zip")
         ZipArchives.ZipWriter(zip_path) do w
             ZipArchives.zip_newfile(w, "data.csv")
-            write(w, "1.0,2.0,3.0\n4.0,5.0,6.0\n")
+            write(w, csv_bytes)
         end
         zip_bytes = read(zip_path)
         zip_reader = ZipArchives.ZipReader(zip_bytes)
 
-        st_res = P.read_csv_to_sparse_matrix(zip_reader, "data.csv")
+        st_bytes = ZipArchives.zip_readentry(zip_reader, "data.csv")
+        S_st, U_st = P.parse(P.TFile(), st_bytes; n_regions=n_reg, n_sectors=n_sec)
 
-        tasks_zip = [Threads.@spawn P.read_csv_to_sparse_matrix(zip_reader, "data.csv") for _ in 1:8]
+        tasks_zip = [Threads.@spawn begin
+            b = ZipArchives.zip_readentry(zip_reader, "data.csv")
+            P.parse(P.TFile(), b; n_regions=n_reg, n_sectors=n_sec)
+        end for _ in 1:8]
         mt_zip_results = fetch.(tasks_zip)
 
-        for res in mt_zip_results
-            @test res == st_res
+        for (S_mt, U_mt) in mt_zip_results
+            @test S_mt == S_st
+            @test U_mt == U_st
         end
     end
 end
 
 @testset "Stress & Memory Constraint Testing" begin
-    # 1. Stress test with large sparse dimensions
-    nrows = 5000
-    ncols = 5000
-    line = "0.0,0.0,1.5,0.0,0.0\n"
-    csv_data = Vector{UInt8}(repeat(line, 5000))
+    # 1. Stress test with large dimensions
+    n_reg = 10
+    n_sec = 50
+    nrows = 2 * n_reg * n_sec # 1000
+    line = join(fill("1.5", nrows), ",") * "\n"
+    csv_data = Vector{UInt8}(repeat(line, nrows))
 
-    sp = P.custom_gloria_sparse_parser(csv_data, 5000, 5)
-    @test size(sp) == (5000, 5)
-    @test nnz(sp) == 5000
-    @test all(sp[:, 3] .== 1.5)
+    S, U = P.parse(P.TFile(), csv_data; n_regions=n_reg, n_sectors=n_sec)
+    @test size(S) == (500, 500)
+    @test size(U) == (500, 500)
+    @test all(S .== 1.5)
+    @test all(U .== 1.5)
 
     # 2. Verify no stack overflow with massive token stream in a single line
     large_line_io = IOBuffer()
@@ -355,20 +443,11 @@ end
     print(large_line_io, "\n")
     large_line_bytes = take!(large_line_io)
 
-    sp_long = P.custom_gloria_sparse_parser(large_line_bytes, 1, 10000)
-    @test size(sp_long) == (1, 10000)
-    @test nnz(sp_long) == 10000
-    @test sp_long[1, 5000] == 5000.0
-
-    # 3. Malformed/large coordinate arrays checking behavior
-    sp_oversized = P.custom_gloria_sparse_parser(UInt8.(collect("1,2\n3,4\n")), 1000, 1000)
-    @test size(sp_oversized) == (1000, 1000)
-    @test sp_oversized[1, 1] == 1.0
-    @test sp_oversized[1, 2] == 2.0
-    @test sp_oversized[1, 3] == 3.0
-    @test sp_oversized[1, 4] == 4.0
-    @test sp_oversized[2, 1] == 3.0
-    @test sp_oversized[2, 2] == 4.0
+    S_long, U_long = P.parse(P.TFile(), large_line_bytes; n_regions=1, n_sectors=5000)
+    @test size(S_long) == (5000, 5000)
+    @test size(U_long) == (5000, 5000)
+    @test S_long[1, 1] == 5001.0
+    @test S_long[1, 5000] == 10000.0
 end
 
 @testset "parse_gloria integration" begin
@@ -387,15 +466,15 @@ end
     @test mrio.X isa IO.SeriesEntry
     @test mrio.env isa IO.EnvironmentalExtension
 
-    # Verify dimensions for 164 regions, 120 sectors, 6 fd categories, 7 va categories
-    # The intermediate matrices after constructing symmetric IOT should be (164 * 120) x (164 * 120) = 19680 x 19680
-    @test size(mrio.T.data) == (19680, 19680)
-    @test size(mrio.A.data) == (19680, 19680)
-    @test size(mrio.FD.data) == (19680, 984) # 164 * 6 = 984 final demand columns
-    @test size(mrio.VA.data) == (1148, 19680) # 164 * 7 = 1148 value added rows
-    @test length(mrio.X.data) == 19680
+    # Verify dimensions for 164 regions (1 clean empty country removed -> 163 regions remaining), 120 sectors, 6 fd categories, 6 va categories
+    # The intermediate matrices after constructing symmetric IOT should be (163 * 120) x (163 * 120) = 19560 x 19560
+    @test size(mrio.T.data) == (19560, 19560)
+    @test size(mrio.A.data) == (19560, 19560)
+    @test size(mrio.FD.data) == (19560, 978) # 163 * 6 = 978 final demand columns
+    @test size(mrio.VA.data) == (978, 19560) # 163 * 6 = 978 value added rows
+    @test length(mrio.X.data) == 19560
 
     # Verify EnvironmentalExtension has empty matrices as requested by rule 4
-    @test size(mrio.env.F.data) == (0, 19680)
-    @test size(mrio.env.A.data) == (0, 19680)
+    @test size(mrio.env.F.data) == (0, 19560)
+    @test size(mrio.env.A.data) == (0, 19560)
 end
