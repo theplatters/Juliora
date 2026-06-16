@@ -1,4 +1,3 @@
-
 """
 	EnvironmentalExtension
 
@@ -14,8 +13,8 @@ such as CO2 emissions, water use, land use, etc. The `F` matrix contains
 direct impacts while `A` contains impact intensities (impacts per dollar of output).
 """
 struct EnvironmentalExtension
-	F::MatrixEntry
-	A::MatrixEntry
+    F::MatrixEntry
+    A::MatrixEntry
 end
 
 """
@@ -72,11 +71,11 @@ julia> size(env_ext.F.data)
 ```
 """
 function EnvironmentalExtension(path::String, x, t_indices, row_mask)
-	f_data = CSV.read(path * "Q.txt", Tables.matrix, header = false)
-	f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
-		@select(Stressor = Column1, Source = Column2)
-	end
-	f = MatrixEntry(f_data[:,row_mask], t_indices, f_indices)
+    f_data = CSV.read(path * "Q.txt", Tables.matrix, header = false)
+    f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
+        @select(Stressor = Column1, Source = Column2)
+    end
+    f = MatrixEntry(f_data[:, row_mask], t_indices, f_indices)
 
-	EnvironmentalExtension(f, calculate_technical_coefficients(f, x))
+    return EnvironmentalExtension(f, calculate_technical_coefficients(f, x))
 end

@@ -14,4 +14,4 @@ count(sum(a.A.data, dims = 1) .> 1.0)
 
 Juliora.aggregate(ag, sum)
 
-sum(ones(3,3),dims=2)
+sum(ones(3, 3), dims = 2)

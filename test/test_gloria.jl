@@ -452,6 +452,12 @@ end
 
 @testset "parse_gloria integration" begin
     path = "data/GLORIA"
+    if !isdir(path)
+        path = joinpath(dirname(dirname(pathof(Juliora))), "data", "GLORIA")
+    end
+    if !isdir(path)
+        path = "/home/franzs/Schreibtisch/Arbeit/Juliora/data/GLORIA"
+    end
     year = 2019
     version = 60
 

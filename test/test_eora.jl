@@ -257,7 +257,7 @@ end
         VA_data = [10.0 20.0 30.0 40.0]
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
 
-        eora = Eora(
+        eora = MRIO(
             Z = IO.MatrixEntry(Z_data, col_df, row_df),
             Y = IO.MatrixEntry(Y_data, Y_col_df, row_df),
             VA = IO.MatrixEntry(VA_data, row_df, VA_row_df)
@@ -324,7 +324,7 @@ end
         VA_data = rand(1, n_sectors) * 20
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
 
-        eora = Eora(
+        eora = MRIO(
             Z = IO.MatrixEntry(Z_data, col_df, row_df),
             Y = IO.MatrixEntry(Y_data, Y_col_df, row_df),
             VA = IO.MatrixEntry(VA_data, row_df, VA_row_df)
@@ -389,7 +389,7 @@ end
         VA_data = [20.0 25.0 18.0 22.0]
         VA_row_df = DataFrame(ValueAddedType = ["TotalValueAdded"])
 
-        eora = Eora(
+        eora = MRIO(
             Z = IO.MatrixEntry(Z_data, col_df, row_df),
             Y = IO.MatrixEntry(Y_data, Y_col_df, row_df),
             VA = IO.MatrixEntry(VA_data, row_df, VA_row_df)

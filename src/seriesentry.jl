@@ -1,4 +1,3 @@
-
 """
 	SeriesEntry
 
@@ -33,22 +32,21 @@ julia> series.col_indices.Country
 ```
 """
 struct SeriesEntry{T}
-	data::T
-	col_indices::DataFrame
+    data::T
+    col_indices::DataFrame
     col_lookup::Dict{NamedTuple, Int}
 end
 
-function SeriesEntry(data::T, col_indices::DataFrame) where T
-	@assert length(data) == nrow(col_indices)
-	col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
-	return SeriesEntry{T}(data, col_indices, col_lookup)
+function SeriesEntry(data::T, col_indices::DataFrame) where {T}
+    @assert length(data) == nrow(col_indices)
+    col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
+    return SeriesEntry{T}(data, col_indices, col_lookup)
 end
 
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
-	col_idx = get(m.col_lookup, col_key, nothing)
+    col_idx = get(m.col_lookup, col_key, nothing)
 
-	isnothing(col_idx) && throw(BoundsError(m, col_key))
+    isnothing(col_idx) && throw(BoundsError(m, col_key))
 
-	return m.data[col_idx]
+    return m.data[col_idx]
 end
-

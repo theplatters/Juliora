@@ -1,5 +1,3 @@
-
-
 struct LeontiefFactorization{F} <: AbstractMatrixEntry
     factorization::F
     col_indices::DataFrame
