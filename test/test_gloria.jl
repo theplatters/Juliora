@@ -480,7 +480,7 @@ end
     @test size(mrio.VA.data) == (978, 19560) # 163 * 6 = 978 value added rows
     @test length(mrio.X.data) == 19560
 
-    # Verify EnvironmentalExtension has empty matrices as requested by rule 4
-    @test size(mrio.env.F.data) == (0, 19560)
-    @test size(mrio.env.A.data) == (0, 19560)
+    # Verify EnvironmentalExtension has filled matrices
+    @test size(mrio.env.F.data) == (6130, 19560)
+    @test size(mrio.env.A.data) == (6130, 19560)
 end
