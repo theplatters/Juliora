@@ -51,8 +51,8 @@ Asia_no_china_codes <- setdiff(Asia_codes, "CHN")
 run_regional_analysis <- function(region_name, producer_codes) {
   cat(sprintf("\n--- Analyzing Induced Production: %s ---\n", region_name))
   
-  # Perform the calculation in Julia
-  df <- induced_production(db, EU_codes, producer_codes)
+  # Perform the calculation in Julia using the general function with named parameters
+  df <- induced_production(db, consumer_countries = EU_codes, producer_countries = producer_codes)
   
   total_induced <- sum(df$InducedProduction)
   cat(sprintf("Total production induced: %f\n", total_induced))
@@ -101,13 +101,13 @@ summary_df$Region <- factor(summary_df$Region, levels = summary_df$Region)
 # Plot 1: Total Induced Production by Region
 p1 <- ggplot(summary_df, aes(x = Region, y = InducedProduction / 1e6, fill = Region)) +
   geom_bar(stat = "identity", width = 0.55, show.legend = FALSE) +
-  geom_text(aes(label = sprintf("$%.1f M", InducedProduction / 1e6)), vjust = -0.5, fontface = "bold", size = 4) +
+  geom_text(aes(label = sprintf("$%.1f B", InducedProduction / 1e6)), vjust = -0.5, fontface = "bold", size = 4) +
   scale_fill_manual(values = c("#4A90E2", "#E28B4A", "#4AE290", "#8D4AE2")) +
   labs(
     title = "Production Induced by European Demand (2019)",
-    subtitle = "Computed entirely in Julia via Leontief Solver",
+    subtitle = "Computed entirely in Julia via General Leontief Solver",
     x = "Region",
-    y = "Induced Production (Millions USD)"
+    y = "Induced Production (Billions USD)"
   ) +
   theme_minimal(base_size = 13) +
   theme(
@@ -148,9 +148,9 @@ p2 <- ggplot(top5_all, aes(x = reorder(Label, InducedProduction), y = InducedPro
   scale_fill_manual(values = c("#4A90E2", "#E28B4A", "#4AE290", "#8D4AE2")) +
   labs(
     title = "Top 5 Induced Country-Sectors per Region",
-    subtitle = "Induced by European Final Demand (Millions USD)",
+    subtitle = "Induced by European Final Demand (Billions USD)",
     x = "Sector",
-    y = "Induced Production (Millions USD)"
+    y = "Induced Production (Billions USD)"
   ) +
   theme_minimal(base_size = 12) +
   theme(

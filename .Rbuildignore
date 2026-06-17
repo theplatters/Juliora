@@ -1,0 +1,13 @@
+^R_libs$
+^data$
+^\.vscode$
+^\.git$
+^\.gitignore$
+^Manifest\.toml$
+^Project\.toml$
+^src$
+^test$
+^skills$
+^AGENTS\.md$
+^.*\.Rcheck$
+^..Rcheck$

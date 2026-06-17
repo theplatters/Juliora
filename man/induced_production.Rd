@@ -4,14 +4,18 @@
 \alias{induced_production}
 \title{Leontief induced production}
 \usage{
-induced_production(mrio, consumer_countries, producer_countries)
+induced_production(
+  mrio,
+  consumer_countries = character(),
+  producer_countries = character()
+)
 }
 \arguments{
 \item{mrio}{An MRIO database object.}
 
-\item{consumer_countries}{A character vector of consumer country codes.}
+\item{consumer_countries}{A character vector of consumer country codes (default: empty, meaning all consumers).}
 
-\item{producer_countries}{A character vector of producer country codes.}
+\item{producer_countries}{A character vector of producer country codes (default: empty, meaning all producers).}
 }
 \value{
 A data.frame containing columns CountryCode, Sector, and InducedProduction.
@@ -24,6 +28,6 @@ Calculate induced production using the Leontief Inverse
 }
 \examples{
 \dontrun{
-res <- induced_production(mrio, c("DEU", "FRA"), c("IND", "BRA"))
+res <- induced_production(mrio, consumer_countries = c("DEU", "FRA"), producer_countries = c("IND", "BRA"))
 }
 }

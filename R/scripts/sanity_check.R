@@ -18,29 +18,21 @@ EU_codes <- c(
 )
 
 cat("2. Extracting and summing European Final Demand...\n")
-# Mask for European columns in final demand Y
+# We pull Y's metadata and Y's data (Y is very small, so this is extremely fast)
 eu_cols_mask <- db$Y$col_indices$CountryCode %in% EU_codes
-Y_eu_data <- db$Y$data[, eu_cols_mask, drop = FALSE]
+total_eu_demand <- sum(db$Y$data[, eu_cols_mask])
 
-# Sum total final demand
-total_eu_demand <- sum(Y_eu_data)
+cat("3. Solving Globally Induced Production (processed entirely in Julia)...\n")
+# Call general induced_production with no producer filter (returns all producing sectors)
+global_induced_df <- induced_production(db, consumer_countries = EU_codes)
+total_global_induced <- sum(global_induced_df$InducedProduction)
+
 cat(sprintf("Total European Final Demand: %f\n", total_eu_demand))
-
-cat("3. Solving Globally Induced Production...\n")
-# Sum rows to get the demand vector for each world sector
-y_eu <- rowSums(Y_eu_data)
-
-# Solve Leontief equation: x = L * y_eu
-# Access full L matrix data
-L_matrix <- db$L$data
-x_induced <- L_matrix %*% y_eu
-
-total_global_induced <- sum(x_induced)
 cat(sprintf("Total Globally Induced Production: %f\n", total_global_induced))
 
 # 4. Calculate Ratio
 multiplier_ratio <- total_global_induced / total_eu_demand
-cat("\n--- Sanity Check ---\n")
+cat("\n--- Sanity Check Results ---\n")
 cat(sprintf("Ratio (Globally Induced Output / European Demand): %f\n", multiplier_ratio))
 
 if (multiplier_ratio > 1) {
@@ -49,11 +41,11 @@ if (multiplier_ratio > 1) {
   cat("WARNING: The ratio is less than or equal to 1, indicating a potential calculation issue.\n")
 }
 
-# 5. Units discussion
+# 5. Units analysis
 cat("\n--- Units Analysis ---\n")
 cat("Note on units:\n")
-cat("GLORIA monetary values are typically reported in thousands of USD (1000 USD).\n")
-cat(sprintf("If the raw value is %f, this corresponds to:\n", total_eu_demand))
-cat(sprintf("  - In raw units: %f thousands\n", total_eu_demand))
-cat(sprintf("  - In billions: %.3f Billion\n", total_eu_demand / 1e6))
-cat(sprintf("  - In trillions: %.3f Trillion\n", total_eu_demand / 1e9))
+cat("GLORIA monetary values are reported in thousands of USD (1000 USD).\n")
+cat(sprintf("If the raw final demand is %f, this corresponds to:\n", total_eu_demand))
+cat(sprintf("  - In raw database units: %f thousands\n", total_eu_demand))
+cat(sprintf("  - In billions: %.3f Billion USD\n", total_eu_demand / 1e6))
+cat(sprintf("  - In trillions: %.3f Trillion USD\n", total_eu_demand / 1e9))

@@ -890,17 +890,17 @@ country_summary <- function(m) {
 #' @description Calculate the production induced by the final demand of specified consumer countries on specified producer countries.
 #'
 #' @param mrio An MRIO database object.
-#' @param consumer_countries A character vector of consumer country codes.
-#' @param producer_countries A character vector of producer country codes.
+#' @param consumer_countries A character vector of consumer country codes (default: empty, meaning all consumers).
+#' @param producer_countries A character vector of producer country codes (default: empty, meaning all producers).
 #'
 #' @return A data.frame containing columns CountryCode, Sector, and InducedProduction.
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' res <- induced_production(mrio, c("DEU", "FRA"), c("IND", "BRA"))
+#' res <- induced_production(mrio, consumer_countries = c("DEU", "FRA"), producer_countries = c("IND", "BRA"))
 #' }
-induced_production <- function(mrio, consumer_countries, producer_countries) {
+induced_production <- function(mrio, consumer_countries = character(), producer_countries = character()) {
   if (!inherits(mrio, "MRIO")) {
     stop("Argument 'mrio' must be an MRIO object.", call. = FALSE)
   }
@@ -914,44 +914,15 @@ induced_production <- function(mrio, consumer_countries, producer_countries) {
   get_julia_connection()
   
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.induced_production", unwrap_julia_object(mrio), as.character(consumer_countries), as.character(producer_countries))
+    JuliaConnectoR::juliaCall(
+      "Juliora.induced_production", 
+      unwrap_julia_object(mrio), 
+      consumer_countries = as.list(consumer_countries), 
+      producer_countries = as.list(producer_countries)
+    )
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
   
   as.data.frame(res)
-}
-
-#' Run sanity check on demand
-#'
-#' @title Sanity check on demand
-#' @description Calculate total final demand for specified consumer countries, total globally induced output, and the ratio between them.
-#'
-#' @param mrio An MRIO database object.
-#' @param consumer_countries A character vector of consumer country codes.
-#'
-#' @return A list containing elements total_demand, total_induced, and ratio.
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' res <- sanity_check_demand(mrio, c("DEU", "FRA"))
-#' }
-sanity_check_demand <- function(mrio, consumer_countries) {
-  if (!inherits(mrio, "MRIO")) {
-    stop("Argument 'mrio' must be an MRIO object.", call. = FALSE)
-  }
-  if (!is.character(consumer_countries)) {
-    stop("Argument 'consumer_countries' must be a character vector.", call. = FALSE)
-  }
-  
-  get_julia_connection()
-  
-  res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.sanity_check_demand", unwrap_julia_object(mrio), as.character(consumer_countries))
-  }, error = function(e) {
-    stop("Julia Error: ", e$message, call. = FALSE)
-  })
-  
-  as.list(res)
 }

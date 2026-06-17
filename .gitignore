@@ -1,2 +1,6 @@
 data
 settings.json
+R_libs/
+..Rcheck/
+.agents/
+R/plots/

@@ -9,7 +9,7 @@ using CSV
 
 export Eora, Gloria, MRIO, parse_gloria, parse_gloria_sut, EnvironmentalExtension, groupby, aggregate, filter_rows, filter_cols, drop, drop!
 export MatrixEntry, SeriesEntry
-export filter_matrix, to_long_dataframe, from_long_dataframe, groupby_matrix, sum_by_country, sum_by_sector, add_calculated_column, pivot_matrix_to_wide, matrix_summary, country_summary, induced_production, sanity_check_demand
+export filter_matrix, to_long_dataframe, from_long_dataframe, groupby_matrix, sum_by_country, sum_by_sector, add_calculated_column, pivot_matrix_to_wide, matrix_summary, country_summary, induced_production
 
 function safe_dataframe(df)
     if df isa DataFrame
