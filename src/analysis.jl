@@ -223,3 +223,71 @@ function country_summary(m::AbstractMatrixEntry)
     )
     return sort!(res, :total_flow, rev = true)
 end
+
+"""
+    induced_production(mrio::MRIO, consumer_countries::Vector{String}, producer_countries::Vector{String})
+
+Calculate the production induced by the final demand of specified consumer countries 
+on specified producer countries using the Leontief Inverse matrix.
+"""
+function induced_production(mrio::MRIO, consumer_countries::Vector{String}, producer_countries::Vector{String})
+    # 1. Identify columns in Y corresponding to the consumer countries
+    y_cols = mrio.Y.col_indices.CountryCode
+    consumer_mask = [c in consumer_countries for c in y_cols]
+    
+    # 2. Get the final demand submatrix and sum rows to get a vector
+    y_eu = sum(mrio.Y.data[:, consumer_mask], dims=2)[:]
+    
+    # 3. Calculate induced production: x = L * y (solving linear system)
+    x_induced = mrio.L.factorization \ y_eu
+    
+    # 4. Filter for producer countries
+    row_indices = mrio.L.row_indices
+    producer_mask = [c in producer_countries for c in row_indices.CountryCode]
+    
+    # 5. Build and return DataFrame
+    df = DataFrame(
+        CountryCode = row_indices.CountryCode[producer_mask],
+        Sector = row_indices.Sector[producer_mask],
+        InducedProduction = x_induced[producer_mask]
+    )
+    return df
+end
+
+function induced_production(mrio::MRIO, consumer_countries::Union{String, Vector{String}}, producer_countries::Union{String, Vector{String}})
+    consumers = consumer_countries isa String ? [consumer_countries] : Vector{String}(consumer_countries)
+    producers = producer_countries isa String ? [producer_countries] : Vector{String}(producer_countries)
+    return induced_production(mrio, consumers, producers)
+end
+
+"""
+    sanity_check_demand(mrio::MRIO, consumer_countries::Vector{String})
+
+Calculate total final demand for specified consumer countries, total globally induced output,
+and the ratio between them.
+"""
+function sanity_check_demand(mrio::MRIO, consumer_countries::Vector{String})
+    # 1. Identify columns in Y corresponding to the consumer countries
+    y_cols = mrio.Y.col_indices.CountryCode
+    consumer_mask = [c in consumer_countries for c in y_cols]
+    
+    # 2. Get final demand sum
+    total_demand = sum(mrio.Y.data[:, consumer_mask])
+    
+    # 3. Sum rows of Y to get the demand vector for each world sector
+    y_eu = sum(mrio.Y.data[:, consumer_mask], dims=2)[:]
+    
+    # 4. Solve Leontief equation globally: x = L * y_eu
+    x_induced = mrio.L.factorization \ y_eu
+    total_induced = sum(x_induced)
+    
+    # 5. Calculate ratio
+    ratio = total_induced / total_demand
+    
+    return (total_demand = total_demand, total_induced = total_induced, ratio = ratio)
+end
+
+function sanity_check_demand(mrio::MRIO, consumer_countries::Union{String, Vector{String}})
+    consumers = consumer_countries isa String ? [consumer_countries] : Vector{String}(consumer_countries)
+    return sanity_check_demand(mrio, consumers)
+end

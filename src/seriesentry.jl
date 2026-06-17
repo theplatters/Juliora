@@ -43,6 +43,11 @@ function SeriesEntry(data::T, col_indices::DataFrame) where {T}
     return SeriesEntry{T}(data, col_indices, col_lookup)
 end
 
+function SeriesEntry(data, col_indices)
+    return SeriesEntry(data, safe_dataframe(col_indices))
+end
+
+
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
     col_idx = get(m.col_lookup, col_key, nothing)
 

@@ -68,6 +68,10 @@ function MatrixEntry(data::AbstractMatrix, col_indices::DataFrame, row_indices::
     return MatrixEntry(data_float, col_indices, row_indices)
 end
 
+function MatrixEntry(data::AbstractMatrix, col_indices, row_indices)
+    return MatrixEntry(data, safe_dataframe(col_indices), safe_dataframe(row_indices))
+end
+
 
 """
 	Base.getindex(m::MatrixEntry, row_key::NamedTuple, col_key::NamedTuple)

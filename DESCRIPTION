@@ -1,0 +1,17 @@
+Package: Juliora
+Title: R Bindings for Juliora Julia Package
+Version: 0.1.0
+Authors@R: person("Gloria", "Parser Team", email = "gloria@example.com", role = c("aut", "cre"))
+Author: Gloria Parser Team [aut, cre]
+Maintainer: Gloria Parser Team <gloria@example.com>
+Description: Provides high-performance multi-regional input-output (MRIO) database parsing and analysis functions, wrapping the 'Juliora' Julia package.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports:
+    JuliaConnectoR
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+SystemRequirements: Julia (>= 1.6)
+Config/roxygen2/version: 8.0.0
