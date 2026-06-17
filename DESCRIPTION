@@ -1,9 +1,9 @@
 Package: Juliora
 Title: R Bindings for Juliora Julia Package
 Version: 0.1.0
-Authors@R: person("Gloria", "Parser Team", email = "gloria@example.com", role = c("aut", "cre"))
-Author: Gloria Parser Team [aut, cre]
-Maintainer: Gloria Parser Team <gloria@example.com>
+Authors@R: person("Franz", "Scharnreitner", email = "franz.scharnreitner@jku.at", role = c("aut", "cre"))
+Author: Franz Scharnreitner [aut, cre]
+Maintainer: Franz Scharnreitner <franz.scharnreitner@jku.at>
 Description: Provides high-performance multi-regional input-output (MRIO) database parsing and analysis functions, wrapping the 'Juliora' Julia package.
 License: MIT + file LICENSE
 Encoding: UTF-8
