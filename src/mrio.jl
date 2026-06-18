@@ -179,3 +179,96 @@ function Base.getproperty(eora::MRIO, sym::Symbol)
         return getfield(eora, sym)
     end
 end
+
+# Convenience query functions
+
+"""
+    countries(df::DataFrame)
+    countries(m::AbstractMatrixEntry)
+    countries(s::SeriesEntry)
+    countries(env::EnvironmentalExtension)
+    countries(mrio::MRIO)
+
+Return a vector of unique country codes/names available in the data or database.
+"""
+function countries(df::DataFrame)
+    if "CountryCode" in names(df)
+        return unique(df.CountryCode)
+    elseif "Country" in names(df)
+        return unique(df.Country)
+    else
+        return String[]
+    end
+end
+
+function countries(m::AbstractMatrixEntry)
+    c_rows = countries(m.row_indices)
+    c_cols = countries(m.col_indices)
+    return unique(vcat(c_rows, c_cols))
+end
+
+countries(s::SeriesEntry) = countries(s.col_indices)
+countries(env::EnvironmentalExtension) = countries(env.F)
+countries(mrio::MRIO) = countries(mrio.Z)
+
+const country = countries
+
+"""
+    sectors(df::DataFrame)
+    sectors(m::AbstractMatrixEntry)
+    sectors(s::SeriesEntry)
+    sectors(env::EnvironmentalExtension)
+    sectors(mrio::MRIO)
+
+Return a vector of unique sector names available in the data or database.
+"""
+function sectors(df::DataFrame)
+    if "Sector" in names(df)
+        return unique(df.Sector)
+    elseif "Industry" in names(df)
+        return unique(df.Industry)
+    else
+        return String[]
+    end
+end
+
+function sectors(m::AbstractMatrixEntry)
+    s_rows = sectors(m.row_indices)
+    s_cols = sectors(m.col_indices)
+    return unique(vcat(s_rows, s_cols))
+end
+
+sectors(s::SeriesEntry) = sectors(s.col_indices)
+sectors(env::EnvironmentalExtension) = sectors(env.F)
+sectors(mrio::MRIO) = sectors(mrio.Z)
+
+const sector = sectors
+
+"""
+    stressors(df::DataFrame)
+    stressors(m::AbstractMatrixEntry)
+    stressors(s::SeriesEntry)
+    stressors(env::EnvironmentalExtension)
+    stressors(mrio::MRIO)
+
+Return a vector of unique stressor names available in the database.
+"""
+function stressors(df::DataFrame)
+    if "Stressor" in names(df)
+        return unique(df.Stressor)
+    else
+        return String[]
+    end
+end
+
+function stressors(m::AbstractMatrixEntry)
+    s_rows = stressors(m.row_indices)
+    s_cols = stressors(m.col_indices)
+    return unique(vcat(s_rows, s_cols))
+end
+
+stressors(s::SeriesEntry) = stressors(s.col_indices)
+stressors(env::EnvironmentalExtension) = stressors(env.F.row_indices)
+stressors(mrio::MRIO) = stressors(mrio.env)
+
+const stressor = stressors

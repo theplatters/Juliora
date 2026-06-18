@@ -37,4 +37,8 @@ using Tidier
     @testset "Gloria Parser Tests" begin
         include("test_gloria.jl")
     end
+
+    @testset "Aggregation Tests" begin
+        include("test_aggregation.jl")
+    end
 end

@@ -23,6 +23,13 @@ export(pivot_matrix_to_wide)
 export(matrix_summary)
 export(country_summary)
 export(induced_production)
+export(countries)
+export(country)
+export(sectors)
+export(sector)
+export(stressors)
+export(stressor)
+
 
 S3method(print, MatrixEntry)
 S3method("[", MatrixEntry)

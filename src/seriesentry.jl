@@ -55,3 +55,22 @@ function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
 
     return m.data[col_idx]
 end
+
+struct GroupedSeriesEntry
+    original::SeriesEntry
+    grouped::GroupedDataFrame
+    cols
+end
+
+function groupby(s::SeriesEntry, cols)
+    grouped = DataFrames.groupby(s.col_indices, cols)
+    return GroupedSeriesEntry(s, grouped, cols)
+end
+
+function aggregate(gs::GroupedSeriesEntry, func::Function = sum)
+    ind = groupindices(gs.grouped)
+    groups = unique(ind)
+    new_data = [func(gs.original.data[ind .== g]) for g in groups]
+    new_col_indices = unique(select(gs.original.col_indices, groupcols(gs.grouped)))
+    return SeriesEntry(new_data, new_col_indices)
+end

@@ -294,3 +294,87 @@ end
     
     @test with_gdp_class.row_indices.GDPClass == ["High", "Medium", "Low"]
 end
+
+@testset "Convenience Query Functions" begin
+    # Create mock data
+    f_data = [1.0 2.0; 3.0 4.0; 5.0 6.0] # 3 stressors x 2 sectors
+    sector_indices = DataFrame(
+        CountryCode = ["USA", "CHN"],
+        Industry = ["Agr", "Man"],
+        Sector = ["Primary", "Secondary"]
+    )
+    stressor_indices = DataFrame(
+        Stressor = ["CO2", "Water", "Land"],
+        Source = ["Fossil", "Fresh", "Arable"]
+    )
+    x_output = [10.0, 20.0]
+    
+    # 1. Test DataFrame methods
+    @test countries(sector_indices) == ["USA", "CHN"]
+    @test sectors(sector_indices) == ["Primary", "Secondary"]
+    @test stressors(stressor_indices) == ["CO2", "Water", "Land"]
+    
+    # Test fallback
+    @test countries(DataFrame(A=[1])) == String[]
+    @test sectors(DataFrame(A=[1])) == String[]
+    @test stressors(DataFrame(A=[1])) == String[]
+    
+    # 2. Test MatrixEntry methods
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, stressor_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices)
+    
+    @test countries(f_matrix) == ["USA", "CHN"]
+    @test sectors(f_matrix) == ["Primary", "Secondary"]
+    @test stressors(f_matrix) == ["CO2", "Water", "Land"]
+    
+    # Test singular aliases
+    @test country(f_matrix) == ["USA", "CHN"]
+    @test sector(f_matrix) == ["Primary", "Secondary"]
+    @test stressor(f_matrix) == ["CO2", "Water", "Land"]
+    
+    # 3. Test SeriesEntry methods
+    s_entry = SeriesEntry(x_output, sector_indices)
+    @test countries(s_entry) == ["USA", "CHN"]
+    @test sectors(s_entry) == ["Primary", "Secondary"]
+    @test country(s_entry) == ["USA", "CHN"]
+    @test sector(s_entry) == ["Primary", "Secondary"]
+    
+    # 4. Test EnvironmentalExtension methods
+    env_ext = EnvironmentalExtension(f_matrix, a_matrix)
+    @test countries(env_ext) == ["USA", "CHN"]
+    @test sectors(env_ext) == ["Primary", "Secondary"]
+    @test stressors(env_ext) == ["CO2", "Water", "Land"]
+    @test country(env_ext) == ["USA", "CHN"]
+    @test sector(env_ext) == ["Primary", "Secondary"]
+    @test stressor(env_ext) == ["CO2", "Water", "Land"]
+    
+    # 5. Test MRIO methods
+    z_data = [10.0 2.0; 3.0 15.0]
+    y_data = [5.0 1.0; 2.0 8.0]
+    va_data = [2.0 3.0; 1.0 1.0]
+    
+    z_matrix = IO.MatrixEntry(z_data, sector_indices, sector_indices)
+    y_matrix = IO.MatrixEntry(y_data, sector_indices, sector_indices)
+    
+    va_col_indices = DataFrame(Category = ["Compensation", "Taxes"])
+    va_matrix = IO.MatrixEntry(va_data, sector_indices, va_col_indices)
+    
+    mrio = MRIO(Z = z_matrix, Y = y_matrix, VA = va_matrix)
+    
+    @test countries(mrio) == ["USA", "CHN"]
+    @test sectors(mrio) == ["Primary", "Secondary"]
+    
+    # Attach env_ext to mrio and test stressors
+    mrio_with_env = MRIO(
+        mrio.A,
+        mrio.T,
+        mrio.VA,
+        mrio.FD,
+        mrio.L,
+        mrio.X,
+        env_ext
+    )
+    @test stressors(mrio_with_env) == ["CO2", "Water", "Land"]
+    @test stressor(mrio_with_env) == ["CO2", "Water", "Land"]
+end
+

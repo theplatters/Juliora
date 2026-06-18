@@ -510,13 +510,18 @@ struct GroupedMatrixEntry <: AbstractMatrixEntry
 end
 
 function groupby(m::MatrixEntry, cols; dims::Int = 1)
-    # Group row indices by the specified columns
-    grouped = DataFrames.groupby(m.row_indices, cols)
+    if dims == 1
+        grouped = DataFrames.groupby(m.row_indices, cols)
+    elseif dims == 2
+        grouped = DataFrames.groupby(m.col_indices, cols)
+    else
+        throw(ArgumentError("dims must be 1 (rows) or 2 (columns)"))
+    end
 
     return GroupedMatrixEntry(m, grouped, dims, cols)
 end
 
-function aggregate(gm::GroupedMatrixEntry, func::Function)
+function aggregate(gm::GroupedMatrixEntry, func::Function = sum)
     ind = groupindices(gm.grouped)
     groups = unique(ind)
     if gm.dims == 1

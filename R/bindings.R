@@ -926,3 +926,139 @@ induced_production <- function(mrio, consumer_countries = character(), producer_
   
   as.data.frame(res)
 }
+
+#' Get unique countries in the MRIO database or data structure
+#'
+#' @title Get available countries
+#' @description Retrieve a character vector of unique country codes/names available in the MRIO database or data structure.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique country codes.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' countries(mrio_db)
+#' }
+countries <- function(x) {
+  get_julia_connection()
+  
+  res <- tryCatch({
+    x_jl <- unwrap_julia_object(x)
+    JuliaConnectoR::juliaCall("Juliora.countries", x_jl)
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+  
+  as.character(res)
+}
+
+#' Get unique countries in the MRIO database or data structure (alias)
+#'
+#' @title Get available country codes (alias)
+#' @description Retrieve a character vector of unique country codes/names available in the MRIO database or data structure.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique country codes.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' country(mrio_db)
+#' }
+country <- function(x) {
+  countries(x)
+}
+
+#' Get unique sectors in the MRIO database or data structure
+#'
+#' @title Get available sectors
+#' @description Retrieve a character vector of unique sector names available in the MRIO database or data structure.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique sector names.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' sectors(mrio_db)
+#' }
+sectors <- function(x) {
+  get_julia_connection()
+  
+  res <- tryCatch({
+    x_jl <- unwrap_julia_object(x)
+    JuliaConnectoR::juliaCall("Juliora.sectors", x_jl)
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+  
+  as.character(res)
+}
+
+#' Get unique sectors in the MRIO database or data structure (alias)
+#'
+#' @title Get available sectors (alias)
+#' @description Retrieve a character vector of unique sector names available in the MRIO database or data structure.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique sector names.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' sector(mrio_db)
+#' }
+sector <- function(x) {
+  sectors(x)
+}
+
+#' Get unique stressors in the MRIO database or environmental extension
+#'
+#' @title Get available stressors
+#' @description Retrieve a character vector of unique stressor names available in the MRIO database or environmental extension.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique stressor names.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' stressors(mrio_db)
+#' }
+stressors <- function(x) {
+  get_julia_connection()
+  
+  res <- tryCatch({
+    x_jl <- unwrap_julia_object(x)
+    JuliaConnectoR::juliaCall("Juliora.stressors", x_jl)
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+  
+  as.character(res)
+}
+
+#' Get unique stressors in the MRIO database or environmental extension (alias)
+#'
+#' @title Get available stressors (alias)
+#' @description Retrieve a character vector of unique stressor names available in the MRIO database or environmental extension.
+#'
+#' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
+#'
+#' @return A character vector of unique stressor names.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' stressor(mrio_db)
+#' }
+stressor <- function(x) {
+  stressors(x)
+}
+
