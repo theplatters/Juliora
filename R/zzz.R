@@ -468,12 +468,23 @@ names.MatrixEntry <- function(x) {
   if (missing(i)) {
     return(x$data)
   }
-  if (!is.list(i) || is.null(names(i))) {
-    stop("Subsetting index for SeriesEntry must be a named list.", call. = FALSE)
-  }
   
   get_julia_connection()
   x_jl <- unwrap_julia_object(x)
+  
+  if (is.logical(i) || is.numeric(i)) {
+    res <- tryCatch({
+      JuliaConnectoR::juliaCall("Base.getindex", x_jl, i)
+    }, error = function(e) {
+      stop("Julia Error: ", e$message, call. = FALSE)
+    })
+    return(wrap_julia_object(res))
+  }
+  
+  if (!is.list(i) || is.null(names(i))) {
+    stop("Subsetting index for SeriesEntry must be a logical vector, numeric indices, or a named list.", call. = FALSE)
+  }
+  
   i_jl <- to_named_tuple(i)
   
   res <- tryCatch({

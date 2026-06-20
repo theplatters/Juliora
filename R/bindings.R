@@ -1062,3 +1062,216 @@ stressor <- function(x) {
   stressors(x)
 }
 
+#' Filter MatrixEntry rows or columns
+#'
+#' @param .data A MatrixEntry object.
+#' @param ... Logical expressions evaluated inside the metadata DataFrame.
+#' @param .dims Dimension to filter: 1 for rows, 2 for columns.
+#' @return A filtered MatrixEntry object.
+#' @export
+filter.MatrixEntry <- function(.data, ..., .dims = 1) {
+  if (!.dims %in% c(1, 2)) {
+    stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
+  }
+  meta <- if (.dims == 1) .data$row_indices else .data$col_indices
+  meta$.row_idx_temp <- seq_len(nrow(meta))
+  filtered_meta <- dplyr::filter(meta, ...)
+  mask <- logical(nrow(meta))
+  mask[filtered_meta$.row_idx_temp] <- TRUE
+  if (.dims == 1) {
+    .data[mask, ]
+  } else {
+    .data[, mask]
+  }
+}
+
+#' Mutate metadata in MatrixEntry
+#'
+#' @param .data A MatrixEntry object.
+#' @param ... Name-value pairs of expressions evaluated inside the metadata DataFrame.
+#' @param .dims Dimension to mutate: 1 for rows, 2 for columns.
+#' @return A mutated MatrixEntry object.
+#' @export
+mutate.MatrixEntry <- function(.data, ..., .dims = 1) {
+  if (!.dims %in% c(1, 2)) {
+    stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
+  }
+  meta <- if (.dims == 1) .data$row_indices else .data$col_indices
+  mutated_meta <- dplyr::mutate(meta, ...)
+  get_julia_connection()
+  me_jl <- unwrap_julia_object(.data)
+  if (.dims == 1) {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, .data$col_indices, mutated_meta)
+  } else {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, mutated_meta, .data$row_indices)
+  }
+  wrap_julia_object(res)
+}
+
+#' Select metadata columns in MatrixEntry
+#'
+#' @param .data A MatrixEntry object.
+#' @param ... Columns to select.
+#' @param .dims Dimension to select from: 1 for rows, 2 for columns.
+#' @return A MatrixEntry object with modified metadata columns.
+#' @export
+select.MatrixEntry <- function(.data, ..., .dims = 1) {
+  if (!.dims %in% c(1, 2)) {
+    stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
+  }
+  meta <- if (.dims == 1) .data$row_indices else .data$col_indices
+  selected_meta <- dplyr::select(meta, ...)
+  get_julia_connection()
+  me_jl <- unwrap_julia_object(.data)
+  if (.dims == 1) {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, .data$col_indices, selected_meta)
+  } else {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, selected_meta, .data$row_indices)
+  }
+  wrap_julia_object(res)
+}
+
+#' Rename metadata columns in MatrixEntry
+#'
+#' @param .data A MatrixEntry object.
+#' @param ... Column rename mappings.
+#' @param .dims Dimension to rename columns in: 1 for rows, 2 for columns.
+#' @return A MatrixEntry object with renamed metadata columns.
+#' @export
+rename.MatrixEntry <- function(.data, ..., .dims = 1) {
+  if (!.dims %in% c(1, 2)) {
+    stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
+  }
+  meta <- if (.dims == 1) .data$row_indices else .data$col_indices
+  renamed_meta <- dplyr::rename(meta, ...)
+  get_julia_connection()
+  me_jl <- unwrap_julia_object(.data)
+  if (.dims == 1) {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, .data$col_indices, renamed_meta)
+  } else {
+    res <- JuliaConnectoR::juliaCall("Juliora.MatrixEntry", me_jl$data, renamed_meta, .data$row_indices)
+  }
+  wrap_julia_object(res)
+}
+
+#' Group MatrixEntry by metadata columns
+#'
+#' @param .data A MatrixEntry object.
+#' @param ... Grouping variables.
+#' @param .add Unused.
+#' @param .dims Dimension to group: 1 for rows, 2 for columns.
+#' @return A GroupedMatrixEntry object.
+#' @export
+group_by.MatrixEntry <- function(.data, ..., .add = FALSE, .dims = 1) {
+  args <- as.character(substitute(list(...)))[-1]
+  get_julia_connection()
+  me_jl <- unwrap_julia_object(.data)
+  res <- JuliaConnectoR::juliaCall("Juliora.groupby", me_jl, as.list(args), dims = as.integer(.dims))
+  wrap_julia_object(res)
+}
+
+#' Summarize GroupedMatrixEntry
+#'
+#' @param .data A GroupedMatrixEntry object.
+#' @param ... Unused.
+#' @return An aggregated MatrixEntry.
+#' @export
+summarise.GroupedMatrixEntry <- function(.data, ...) {
+  get_julia_connection()
+  gm_jl <- unwrap_julia_object(.data)
+  res <- JuliaConnectoR::juliaCall("Juliora.aggregate", gm_jl, JuliaConnectoR::juliaEval("sum"))
+  wrap_julia_object(res)
+}
+
+#' @export
+summarize.GroupedMatrixEntry <- summarise.GroupedMatrixEntry
+
+#' Filter SeriesEntry indices
+#'
+#' @param .data A SeriesEntry object.
+#' @param ... Logical expressions.
+#' @return A filtered SeriesEntry.
+#' @export
+filter.SeriesEntry <- function(.data, ...) {
+  meta <- .data$col_indices
+  meta$.row_idx_temp <- seq_len(nrow(meta))
+  filtered_meta <- dplyr::filter(meta, ...)
+  mask <- logical(nrow(meta))
+  mask[filtered_meta$.row_idx_temp] <- TRUE
+  .data[mask]
+}
+
+#' Mutate SeriesEntry metadata
+#'
+#' @param .data A SeriesEntry object.
+#' @param ... Mutation expressions.
+#' @return A mutated SeriesEntry.
+#' @export
+mutate.SeriesEntry <- function(.data, ...) {
+  mutated_meta <- dplyr::mutate(.data$col_indices, ...)
+  get_julia_connection()
+  se_jl <- unwrap_julia_object(.data)
+  res <- JuliaConnectoR::juliaCall("Juliora.SeriesEntry", se_jl$data, mutated_meta)
+  wrap_julia_object(res)
+}
+
+#' Select SeriesEntry metadata columns
+#'
+#' @param .data A SeriesEntry object.
+#' @param ... Columns to select.
+#' @return A SeriesEntry.
+#' @export
+select.SeriesEntry <- function(.data, ...) {
+  selected_meta <- dplyr::select(.data$col_indices, ...)
+  get_julia_connection()
+  se_jl <- unwrap_julia_object(.data)
+  res <- JuliaConnectoR::juliaCall("Juliora.SeriesEntry", se_jl$data, selected_meta)
+  wrap_julia_object(res)
+}
+
+#' Rename SeriesEntry metadata columns
+#'
+#' @param .data A SeriesEntry object.
+#' @param ... Rename expressions.
+#' @return A SeriesEntry.
+#' @export
+rename.SeriesEntry <- function(.data, ...) {
+  renamed_meta <- dplyr::rename(.data$col_indices, ...)
+  get_julia_connection()
+  se_jl <- unwrap_julia_object(.data)
+  res <- JuliaConnectoR::juliaCall("Juliora.SeriesEntry", se_jl$data, renamed_meta)
+  wrap_julia_object(res)
+}
+
+#' Filter MRIO rows or columns
+#'
+#' @param .data An MRIO object.
+#' @param ... Logical expressions.
+#' @param .dims Dimension to filter: 1 for rows, 2 for columns.
+#' @return A filtered MRIO object.
+#' @export
+filter.MRIO <- function(.data, ..., .dims = 1) {
+  if (!.dims %in% c(1, 2)) {
+    stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
+  }
+  meta <- if (.dims == 1) .data$Z$row_indices else .data$Z$col_indices
+  meta$.row_idx_temp <- seq_len(nrow(meta))
+  filtered_meta <- dplyr::filter(meta, ...)
+  mask <- logical(nrow(meta))
+  mask[filtered_meta$.row_idx_temp] <- TRUE
+  
+  get_julia_connection()
+  if (.dims == 1) {
+    new_Z <- .data$Z[mask, ]
+    new_Y <- .data$Y[mask, ]
+    new_VA <- .data$VA[, mask]
+    res <- JuliaConnectoR::juliaCall("Juliora.MRIO", Z = unwrap_julia_object(new_Z), Y = unwrap_julia_object(new_Y), VA = unwrap_julia_object(new_VA))
+  } else {
+    new_Z <- .data$Z[, mask]
+    new_VA <- .data$VA[, mask]
+    res <- JuliaConnectoR::juliaCall("Juliora.MRIO", Z = unwrap_julia_object(new_Z), Y = unwrap_julia_object(.data$Y), VA = unwrap_julia_object(new_VA))
+  }
+  wrap_julia_object(res)
+}
+
+

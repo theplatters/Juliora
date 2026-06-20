@@ -56,6 +56,15 @@ function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
     return m.data[col_idx]
 end
 
+function Base.getindex(m::SeriesEntry, mask::AbstractVector{Bool})
+    return SeriesEntry(m.data[mask], m.col_indices[mask, :])
+end
+
+function Base.getindex(m::SeriesEntry, idxs::AbstractVector{<:Integer})
+    return SeriesEntry(m.data[idxs], m.col_indices[idxs, :])
+end
+
+
 struct GroupedSeriesEntry
     original::SeriesEntry
     grouped::GroupedDataFrame
