@@ -338,7 +338,7 @@ aggregate <- function(gm, func) {
   get_julia_connection()
   
   func_jl <- if (is.character(func)) {
-    JuliaConnectoR::juliaEval(func)
+    func
   } else if (is.function(func)) {
     JuliaConnectoR::juliaFun(func)
   } else {

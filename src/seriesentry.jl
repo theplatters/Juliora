@@ -47,6 +47,9 @@ function SeriesEntry(data, col_indices)
     return SeriesEntry(data, safe_dataframe(col_indices))
 end
 
+Base.length(m::SeriesEntry) = length(m.data)
+
+
 
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
     col_idx = get(m.col_lookup, col_key, nothing)

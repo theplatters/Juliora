@@ -65,8 +65,12 @@ function aggregate(mrio::MRIO, cols; dims::Int = 1, agg_func = sum)
     
     # Aggregate Environmental Extension (env)
     # The columns of F and A correspond to sectors/countries.
-    # Group env.F columns using cols
-    F_agg = aggregate(groupby(mrio.env.F, cols; dims = 2), agg_func)
+    # Group env.F columns using cols only when aggregating the column dimension (dims == 2)
+    F_agg = if dims == 2
+        aggregate(groupby(mrio.env.F, cols; dims = 2), agg_func)
+    else
+        mrio.env.F
+    end
     
     # Calculate new intensities env_A_agg = F_agg ./ x_cols_safe'
     env_A_agg = MatrixEntry(F_agg.data ./ x_cols_safe', F_agg.col_indices, F_agg.row_indices)
@@ -81,4 +85,33 @@ function aggregate(mrio::MRIO, cols; dims::Int = 1, agg_func = sum)
         SeriesEntry(x_agg, T_agg.row_indices),
         env_agg
     )
+end
+
+function string_to_func(func::AbstractString)
+    f = lowercase(func)
+    if f == "sum" || f == "base.sum"
+        return sum
+    elseif f == "mean" || f == "statistics.mean"
+        return Statistics.mean
+    elseif f == "median" || f == "statistics.median"
+        return Statistics.median
+    elseif f == "std" || f == "statistics.std"
+        return Statistics.std
+    elseif f == "var" || f == "statistics.var"
+        return Statistics.var
+    elseif f == "min" || f == "minimum" || f == "base.minimum"
+        return minimum
+    elseif f == "max" || f == "maximum" || f == "base.maximum"
+        return maximum
+    else
+        throw(ArgumentError("Unknown aggregation function string: $func"))
+    end
+end
+
+function aggregate(gm::GroupedMatrixEntry, func::AbstractString)
+    return aggregate(gm, string_to_func(func))
+end
+
+function aggregate(gs::GroupedSeriesEntry, func::AbstractString)
+    return aggregate(gs, string_to_func(func))
 end

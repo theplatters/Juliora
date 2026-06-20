@@ -50,6 +50,7 @@ get_julia_connection <- function() {
     # Activate Julia environment and load Juliora
     JuliaConnectoR::juliaEval(sprintf('using Pkg; Pkg.activate("%s")', proj_dir))
     JuliaConnectoR::juliaEval("using Juliora")
+    JuliaConnectoR::juliaEval("using Statistics")
     
     .juliora_env$juliora <- TRUE
   }
@@ -85,7 +86,11 @@ wrap_julia_object <- function(proxy) {
     return(proxy)
   }
   
-  if (grepl("MatrixEntry", jl_type)) {
+  if (grepl("GroupedMatrixEntry", jl_type)) {
+    return(structure(list(proxy = proxy), class = "GroupedMatrixEntry"))
+  } else if (grepl("GroupedSeriesEntry", jl_type)) {
+    return(structure(list(proxy = proxy), class = "GroupedSeriesEntry"))
+  } else if (grepl("MatrixEntry", jl_type)) {
     return(new_matrix_entry(proxy))
   } else if (grepl("SeriesEntry", jl_type)) {
     return(new_series_entry(proxy))
@@ -95,8 +100,6 @@ wrap_julia_object <- function(proxy) {
     return(new_leontief_factorization(proxy))
   } else if (grepl("MRIO", jl_type)) {
     return(new_mrio(proxy))
-  } else if (grepl("GroupedMatrixEntry", jl_type)) {
-    return(structure(list(proxy = proxy), class = "GroupedMatrixEntry"))
   }
   
   return(proxy)

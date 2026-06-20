@@ -41,4 +41,8 @@ using Tidier
     @testset "Aggregation Tests" begin
         include("test_aggregation.jl")
     end
+
+    @testset "Tidier.jl Integration Tests" begin
+        include("test_tidier_integrations.jl")
+    end
 end
