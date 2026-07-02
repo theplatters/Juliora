@@ -5,6 +5,7 @@ using SparseArrays
 using ZipArchives
 using Mmap
 using Random
+using DataFrames
 
 @testset "Parser Parser Rules" begin
 
@@ -158,7 +159,7 @@ using Random
             year = 2020
             version = 60
             price = P.BasePrice()
-            ext = P.get_extention(price)
+            ext = P.get_extension(price)
 
             zip_name = "GLORIA_MRIOs_$(version)_$(year).zip"
             zip_path = joinpath(tmpdir, zip_name)
@@ -272,6 +273,52 @@ using Random
         end
     end
 
+    @testset "satellite path and readers" begin
+        mktempdir() do tmpdir
+            year = 2019
+            version = 60
+            q_suffix = "_120secMother_AllCountries_002_TQ-Results_$(year)_0$(version)_Markup001(full).csv"
+            qy_suffix = "_120secMother_AllCountries_002_YQ-Results_$(year)_0$(version)_Markup001(full).csv"
+            q_name = "20260121$(q_suffix)"
+            qy_name = "20260121$(qy_suffix)"
+
+            write(joinpath(tmpdir, "notes.txt"), "ignore me")
+            sat_dir = joinpath(tmpdir, "GLORIA_SatelliteAccounds_060_$(year)")
+            mkpath(sat_dir)
+            write(joinpath(sat_dir, q_name), "1.0,2.0\n3.0,4.0\n")
+            write(joinpath(sat_dir, qy_name), "5.0,6.0\n7.0,8.0\n")
+
+            sat_path, sat_kind = P.find_satellite_path(tmpdir, version, year)
+            @test sat_path == sat_dir
+            @test sat_kind === P.Unzipped
+
+            Q, QY = P.read_satellites(sat_kind, sat_path, q_suffix, qy_suffix; n_regions=1, n_sectors=1)
+            @test Q == [1.0; 3.0;;]
+            @test QY == [5.0 6.0; 7.0 8.0]
+
+            zip_year = year + 1
+            q_zip_suffix = "_120secMother_AllCountries_002_TQ-Results_$(zip_year)_0$(version)_Markup001(full).csv"
+            qy_zip_suffix = "_120secMother_AllCountries_002_YQ-Results_$(zip_year)_0$(version)_Markup001(full).csv"
+            zip_path = joinpath(tmpdir, "GLORIA_SatelliteAccounts_060_$(zip_year).zip")
+            ZipArchives.ZipWriter(zip_path) do w
+                ZipArchives.zip_newfile(w, "nested/20260121$(q_zip_suffix)")
+                write(w, "9.0,10.0\n")
+                ZipArchives.zip_newfile(w, "nested/20260121$(qy_zip_suffix)")
+                write(w, "11.0,12.0\n")
+            end
+
+            sat_zip_path, sat_zip_kind = P.find_satellite_path(tmpdir, version, zip_year)
+            @test sat_zip_path == zip_path
+            @test sat_zip_kind === P.Zipped
+
+            Q_zip, QY_zip = P.read_satellites(sat_zip_kind, sat_zip_path, q_zip_suffix, qy_zip_suffix; n_regions=1, n_sectors=1)
+            @test Q_zip == [9.0;;]
+            @test QY_zip == [11.0 12.0]
+
+            @test_throws P.ParserError P.find_satellite_path(tmpdir, version, year + 2)
+        end
+    end
+
     @testset "_construct_IO" begin
         # 1. Valid inputs/syntax
         regions = ["USA", "CHN"]
@@ -296,21 +343,32 @@ using Random
               0.0 0.0 2.0 0.0;
               0.0 0.0 0.0 2.0]
 
-        res = P._construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats)
+        Q_SUT = [10.0 20.0 30.0 40.0;
+                 1.0 2.0 3.0 4.0]
+        QY_SUT = zeros(2, 4)
+        sat_df = DataFrame(Stressor=["CO2", "Water"], Source=["Air", "Fresh"], Unit=["kg", "m3"])
+
+        res = P._construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats, Q_SUT, QY_SUT, sat_df)
         @test res isa Juliora.MRIO
         @test size(res.T.data) == (4, 4)
         @test size(res.A.data) == (4, 4)
         @test size(res.FD.data) == (4, 4)
         @test size(res.VA.data) == (4, 4)
+        @test size(res.env.F.data) == (2, 4)
+        @test size(res.env.A.data) == (2, 4)
+        @test res.env.F.row_indices == sat_df
 
         # 2. Empty inputs
+        empty_sat_df = DataFrame(Stressor=String[], Source=String[], Unit=String[])
         res_empty = P._construct_IO(
             Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
             Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
-            String[], String[], String[], String[]
+            String[], String[], String[], String[],
+            Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0), empty_sat_df
         )
         @test res_empty isa Juliora.MRIO
         @test size(res_empty.T.data) == (0, 0)
+        @test size(res_empty.env.F.data) == (0, 0)
     end
 end
 
@@ -463,14 +521,14 @@ end
 
     mrio = P.parse_gloria(path, year; version = version)
 
-    @test mrio isa IO.MRIO
-    @test mrio.A isa IO.MatrixEntry
-    @test mrio.T isa IO.MatrixEntry
-    @test mrio.VA isa IO.MatrixEntry
-    @test mrio.FD isa IO.MatrixEntry
-    @test mrio.L isa IO.LeontiefFactorization
-    @test mrio.X isa IO.SeriesEntry
-    @test mrio.env isa IO.EnvironmentalExtension
+    @test mrio isa Juliora.MRIO
+    @test mrio.A isa Juliora.MatrixEntry
+    @test mrio.T isa Juliora.MatrixEntry
+    @test mrio.VA isa Juliora.MatrixEntry
+    @test mrio.FD isa Juliora.MatrixEntry
+    @test mrio.L isa Juliora.LeontiefFactorization
+    @test mrio.X isa Juliora.SeriesEntry
+    @test mrio.env isa Juliora.EnvironmentalExtension
 
     # Verify dimensions for 164 regions (1 clean empty country removed -> 163 regions remaining), 120 sectors, 6 fd categories, 6 va categories
     # The intermediate matrices after constructing symmetric IOT should be (163 * 120) x (163 * 120) = 19560 x 19560

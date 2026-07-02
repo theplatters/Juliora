@@ -58,6 +58,10 @@ get_julia_connection <- function() {
 }
 
 .onLoad <- function(libname, pkgname) {
+  if (identical(Sys.getenv("JULIA_NUM_THREADS", unset = ""), "")) {
+    Sys.setenv(JULIA_NUM_THREADS = "auto")
+  }
+
   # Establish the connection dynamically on package load
   tryCatch({
     get_julia_connection()
@@ -543,4 +547,3 @@ names.SeriesEntry <- function(x) {
   fields <- c("data", "col_indices")
   grep(pattern, fields, value = TRUE)
 }
-
