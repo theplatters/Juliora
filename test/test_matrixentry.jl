@@ -21,7 +21,7 @@
     
     # Test dimension mismatch error
     wrong_data = [1.0 2.0; 3.0 4.0]  # 2x2 but indices are 3x3
-    @test_throws AssertionError IO.MatrixEntry(wrong_data, col_df, row_df)
+    @test_throws DimensionMismatch IO.MatrixEntry(wrong_data, col_df, row_df)
     
     # Test lookup dictionary functionality
     usa_agr_key = (Country="USA", Sector="Agriculture")

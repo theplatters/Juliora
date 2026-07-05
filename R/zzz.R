@@ -48,7 +48,7 @@ get_julia_connection <- function() {
     proj_dir <- normalizePath(proj_dir, winslash = "/", mustWork = FALSE)
     
     # Activate Julia environment and load Juliora
-    JuliaConnectoR::juliaEval(sprintf('using Pkg; Pkg.activate("%s")', proj_dir))
+    JuliaConnectoR::juliaEval(sprintf("using Pkg; Pkg.activate(%s)", shQuote(proj_dir)))
     JuliaConnectoR::juliaEval("using Juliora")
     JuliaConnectoR::juliaEval("using Statistics")
     
@@ -61,13 +61,6 @@ get_julia_connection <- function() {
   if (identical(Sys.getenv("JULIA_NUM_THREADS", unset = ""), "")) {
     Sys.setenv(JULIA_NUM_THREADS = "auto")
   }
-
-  # Establish the connection dynamically on package load
-  tryCatch({
-    get_julia_connection()
-  }, error = function(e) {
-    packageStartupMessage("Warning: Could not initialize Julia connection on package load. ", e$message)
-  })
 }
 
 # --- Type Conversion Helpers ---

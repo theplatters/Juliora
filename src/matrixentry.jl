@@ -57,7 +57,10 @@ mutable struct MatrixEntry{T <: AbstractMatrix{Float64}} <: AbstractMatrixEntry
 end
 
 function MatrixEntry(data::T, col_indices::DataFrame, row_indices::DataFrame) where {T <: AbstractMatrix{Float64}}
-    @assert size(data) == (size(row_indices)[1], size(col_indices)[1]) "Data $(size(data)) dimensions must match index DataFrames $(size(row_indices)[1]), $(size(col_indices)[1])"
+    expected_size = (nrow(row_indices), nrow(col_indices))
+    if size(data) != expected_size
+        throw(DimensionMismatch("data $(size(data)) dimensions must match index DataFrames $expected_size"))
+    end
     row_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(row_indices)))
     col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
     return MatrixEntry{T}(data, col_indices, row_indices, row_lookup, col_lookup)
@@ -300,8 +303,12 @@ julia> filtered.data[1, 1]
 ```
 """
 function Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, col_mask::AbstractVector{Bool})
-    @assert length(row_mask) == size(m.data, 1) "Row mask length must match number of rows"
-    @assert length(col_mask) == size(m.data, 2) "Column mask length must match number of columns"
+    if length(row_mask) != size(m.data, 1)
+        throw(DimensionMismatch("row mask length must match number of rows"))
+    end
+    if length(col_mask) != size(m.data, 2)
+        throw(DimensionMismatch("column mask length must match number of columns"))
+    end
 
     new_data = m.data[row_mask, col_mask]
     new_row_indices = m.row_indices[row_mask, :]
@@ -351,7 +358,9 @@ julia> developed_data.row_indices.Country
 ```
 """
 function Base.getindex(m::AbstractMatrixEntry, row_mask::AbstractVector{Bool}, ::Colon)
-    @assert length(row_mask) == size(m.data, 1) "Row mask length must match number of rows"
+    if length(row_mask) != size(m.data, 1)
+        throw(DimensionMismatch("row mask length must match number of rows"))
+    end
 
     new_data = m.data[row_mask, :]
     new_row_indices = m.row_indices[row_mask, :]
@@ -397,7 +406,9 @@ julia> usa_data.col_indices.Country
 ```
 """
 function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_mask::AbstractVector{Bool})
-    @assert length(col_mask) == size(m.data, 2) "Column mask length must match number of columns"
+    if length(col_mask) != size(m.data, 2)
+        throw(DimensionMismatch("column mask length must match number of columns"))
+    end
 
     new_data = m.data[:, col_mask]
     new_col_indices = m.col_indices[col_mask, :]
@@ -584,12 +595,9 @@ function drop!(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
     indices_to_keep = trues(size(m.data, dims))
 
     lookup = dims == 1 ? m.row_lookup : m.col_lookup
-    indices_to_remove = Int[]
-
     for (full_key, idx) in lookup
         if all(k -> haskey(full_key, k) && full_key[k] == indices[k], keys(indices))
             indices_to_keep[idx] = false
-            push!(indices_to_remove, idx)
         end
     end
 
@@ -598,20 +606,18 @@ function drop!(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
         m.data = m.data[indices_to_keep, :]
         deleteat!(m.row_indices, .!indices_to_keep)
 
-        # Rebuild column lookup with new indices
-        empty!(m.col_lookup)
-        for (i, row) in enumerate(eachrow(m.col_indices))
-            m.col_lookup[NamedTuple(row)] = i
+        empty!(m.row_lookup)
+        for (i, row) in enumerate(eachrow(m.row_indices))
+            m.row_lookup[NamedTuple(row)] = i
         end
     else
         # Drop columns
         m.data = m.data[:, indices_to_keep]
         deleteat!(m.col_indices, .!indices_to_keep)
 
-        # Rebuild row lookup with new indices
-        empty!(m.row_lookup)
-        for (i, row) in enumerate(eachrow(m.row_indices))
-            m.row_lookup[NamedTuple(row)] = i
+        empty!(m.col_lookup)
+        for (i, row) in enumerate(eachrow(m.col_indices))
+            m.col_lookup[NamedTuple(row)] = i
         end
     end
 

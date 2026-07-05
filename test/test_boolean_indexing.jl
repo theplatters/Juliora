@@ -47,10 +47,10 @@
     @testset "Boolean Indexing Dimension Mismatch" begin
         # Test wrong length masks
         short_row_mask = [true, false]  # Should be length 4
-        @test_throws AssertionError matrix_entry[short_row_mask, [true, true, true]]
+        @test_throws DimensionMismatch matrix_entry[short_row_mask, [true, true, true]]
         
         long_col_mask = [true, false, true, false, true]  # Should be length 3
-        @test_throws AssertionError matrix_entry[[true, true, true, true], long_col_mask]
+        @test_throws DimensionMismatch matrix_entry[[true, true, true, true], long_col_mask]
     end
 end
 
@@ -83,7 +83,7 @@ end
     @test usa_only.row_indices.Country == ["USA"]
     
     # Test wrong mask length
-    @test_throws AssertionError matrix_entry[[true, false], :]  # Should be length 3
+    @test_throws DimensionMismatch matrix_entry[[true, false], :]  # Should be length 3
 end
 
 @testset "Boolean Indexing Columns Only" begin
@@ -114,7 +114,7 @@ end
     @test non_agr.col_indices.Sector == ["Man", "Ser"]
     
     # Test wrong mask length
-    @test_throws AssertionError matrix_entry[:, [true, false]]  # Should be length 3
+    @test_throws DimensionMismatch matrix_entry[:, [true, false]]  # Should be length 3
 end
 
 @testset "Boolean Indexing Complex Conditions" begin

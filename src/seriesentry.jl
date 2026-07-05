@@ -38,7 +38,9 @@ struct SeriesEntry{T}
 end
 
 function SeriesEntry(data::T, col_indices::DataFrame) where {T}
-    @assert length(data) == nrow(col_indices)
+    if length(data) != nrow(col_indices)
+        throw(DimensionMismatch("data length $(length(data)) must match index DataFrame rows $(nrow(col_indices))"))
+    end
     col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
     return SeriesEntry{T}(data, col_indices, col_lookup)
 end
@@ -48,7 +50,6 @@ function SeriesEntry(data, col_indices)
 end
 
 Base.length(m::SeriesEntry) = length(m.data)
-
 
 
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)

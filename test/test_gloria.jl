@@ -1,7 +1,6 @@
 using Test
 using Juliora
 import Juliora.Parser as P
-using SparseArrays
 using ZipArchives
 using Mmap
 using Random
@@ -113,8 +112,7 @@ using DataFrames
         csv_str = "0.0,0.0,0.0,0.0,0.0,0.0\n5.0,5.0,5.0,5.0,5.0,5.0\n"
         bytes = UInt8.(collect(csv_str))
 
-        # YFile itself is type-unstable (returns Any due to thread loop continue), so we test output type directly
-        Y = P.parse(P.YFile(), bytes; n_regions=1, n_sectors=1)
+        Y = @inferred P.parse(P.YFile(), bytes; n_regions=1, n_sectors=1)
         @test Y isa Matrix{Float64}
         @test size(Y) == (1, 6)
         @test all(Y[1, :] .== 5.0)
@@ -149,9 +147,8 @@ using DataFrames
         bytes_va = UInt8.(collect("1.0,0.0\n2.0,0.0\n"))
         @test (@inferred P.parse(P.VAFile(), bytes_va; n_regions=1, n_sectors=1)) isa Matrix{Float64}
 
-        # YFile itself is type-unstable (returns Any), but its return value is a Matrix{Float64}
         bytes_y = UInt8.(collect("0.0,0.0\n5.0,5.0\n"))
-        @test P.parse(P.YFile(), bytes_y; n_regions=1, n_sectors=1) isa Matrix{Float64}
+        @test (@inferred P.parse(P.YFile(), bytes_y; n_regions=1, n_sectors=1)) isa Matrix{Float64}
     end
 
     @testset "parse_gloria_sut" begin
@@ -278,42 +275,34 @@ using DataFrames
             year = 2019
             version = 60
             q_suffix = "_120secMother_AllCountries_002_TQ-Results_$(year)_0$(version)_Markup001(full).csv"
-            qy_suffix = "_120secMother_AllCountries_002_YQ-Results_$(year)_0$(version)_Markup001(full).csv"
             q_name = "20260121$(q_suffix)"
-            qy_name = "20260121$(qy_suffix)"
 
             write(joinpath(tmpdir, "notes.txt"), "ignore me")
             sat_dir = joinpath(tmpdir, "GLORIA_SatelliteAccounds_060_$(year)")
             mkpath(sat_dir)
             write(joinpath(sat_dir, q_name), "1.0,2.0\n3.0,4.0\n")
-            write(joinpath(sat_dir, qy_name), "5.0,6.0\n7.0,8.0\n")
 
             sat_path, sat_kind = P.find_satellite_path(tmpdir, version, year)
             @test sat_path == sat_dir
             @test sat_kind === P.Unzipped
 
-            Q, QY = P.read_satellites(sat_kind, sat_path, q_suffix, qy_suffix; n_regions=1, n_sectors=1)
+            Q = P.read_satellites(sat_kind, sat_path, q_suffix; n_regions=1, n_sectors=1)
             @test Q == [1.0; 3.0;;]
-            @test QY == [5.0 6.0; 7.0 8.0]
 
             zip_year = year + 1
             q_zip_suffix = "_120secMother_AllCountries_002_TQ-Results_$(zip_year)_0$(version)_Markup001(full).csv"
-            qy_zip_suffix = "_120secMother_AllCountries_002_YQ-Results_$(zip_year)_0$(version)_Markup001(full).csv"
             zip_path = joinpath(tmpdir, "GLORIA_SatelliteAccounts_060_$(zip_year).zip")
             ZipArchives.ZipWriter(zip_path) do w
                 ZipArchives.zip_newfile(w, "nested/20260121$(q_zip_suffix)")
                 write(w, "9.0,10.0\n")
-                ZipArchives.zip_newfile(w, "nested/20260121$(qy_zip_suffix)")
-                write(w, "11.0,12.0\n")
             end
 
             sat_zip_path, sat_zip_kind = P.find_satellite_path(tmpdir, version, zip_year)
             @test sat_zip_path == zip_path
             @test sat_zip_kind === P.Zipped
 
-            Q_zip, QY_zip = P.read_satellites(sat_zip_kind, sat_zip_path, q_zip_suffix, qy_zip_suffix; n_regions=1, n_sectors=1)
+            Q_zip = P.read_satellites(sat_zip_kind, sat_zip_path, q_zip_suffix; n_regions=1, n_sectors=1)
             @test Q_zip == [9.0;;]
-            @test QY_zip == [11.0 12.0]
 
             @test_throws P.ParserError P.find_satellite_path(tmpdir, version, year + 2)
         end
@@ -345,10 +334,9 @@ using DataFrames
 
         Q_SUT = [10.0 20.0 30.0 40.0;
                  1.0 2.0 3.0 4.0]
-        QY_SUT = zeros(2, 4)
         sat_df = DataFrame(Stressor=["CO2", "Water"], Source=["Air", "Fresh"], Unit=["kg", "m3"])
 
-        res = P._construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats, Q_SUT, QY_SUT, sat_df)
+        res = P._construct_IO(V, U, Y, VA, regions, sectors, va_cats, fd_cats, Q_SUT, sat_df)
         @test res isa Juliora.MRIO
         @test size(res.T.data) == (4, 4)
         @test size(res.A.data) == (4, 4)
@@ -364,7 +352,7 @@ using DataFrames
             Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
             Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
             String[], String[], String[], String[],
-            Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0), empty_sat_df
+            Matrix{Float64}(undef, 0, 0), empty_sat_df
         )
         @test res_empty isa Juliora.MRIO
         @test size(res_empty.T.data) == (0, 0)

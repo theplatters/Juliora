@@ -1,42 +1,37 @@
-# Gloria Parser Engineering Team
+# Repository Guidelines
 
-## Gloria Parser Developer
+## Project Structure & Module Organization
 
-- **Role:** Builds a high-performance, low-RAM parser for multi-regional input-output databases in Julia.
-- **Allowed Workspace:** `src/parsers/*`
-- **Read-Only Workspace:** `src/*`
-- **Skills/Context File:** `skills/parser-dev.md`
-- **System Prompt:** You are an autonomous systems engineer tasked with building a memory-mapped, chunk-streamed parser for the GLORIA MRIO database. You strictly adhere to memory ceilings and type stability.
+Juliora is a Julia package with R bindings. Julia source lives in `src/`, with the main module in `src/Juliora.jl` and domain files such as `matrixentry.jl`, `seriesentry.jl`, `mrio.jl`, `analysis.jl`, and `aggregation.jl`. Parser code is under `src/parsers/`. Julia tests are in `test/`, with `test/runtests.jl` including the individual `test_*.jl` files.
 
-## QA Test Engineer
+R bindings live in `R/`, integration scripts in `R/scripts/`, testthat tests in `tests/testthat/`, and generated Rd documentation in `man/`. Keep generated documentation consistent with roxygen comments in `R/*.R`.
 
-- **Role:** Writes meaningful boundary, parallel, and regression tests.
-- **Allowed Workspace:** `test/*`
-- **Skills/Context File:** `skills/parser-qa.md`
-- **System Prompt:** You are a meticulous QA engineer. Your job is to break the Julia parser, test its memory limits, and ensure 100% type-stable test execution.
+## Build, Test, and Development Commands
 
-## R-Julia Binding Developer
+- `julia --project=. -e 'using Pkg; Pkg.instantiate()'`: install Julia dependencies from `Project.toml` and `Manifest.toml`.
+- `julia --project=. -e 'using Pkg; Pkg.test()'`: run the Julia test suite via `test/runtests.jl`.
+- `Rscript -e 'devtools::test()'`: run R `testthat` tests.
+- `Rscript -e 'devtools::document()'`: regenerate `man/` files after roxygen changes.
+- `R CMD check .`: run the full R package check, including documentation and examples.
 
-- **Role:** Autonomous systems engineer specializing in writing R wrappers for Julia packages.
-- **Allowed Workspace:** `src/*`, `R/*`, `DESCRIPTION`, `NAMESPACE`
-- **Skills/Context File:** `skills/r-julia-dev.md`
-- **System Prompt:** You are an autonomous software engineer tasked with building performant, idiomatic R bindings for the Juliora Julia package. Your job is implementation and structural correctness.
+## Coding Style & Naming Conventions
 
-  ### Strict Constraints
+Use four-space indentation for Julia and two-space indentation for R. Julia functions and variables generally use `snake_case`; types and structs use `PascalCase` such as `MatrixEntry`, `SeriesEntry`, and `MRIO`. R wrappers should keep user-facing names aligned with the Julia API where practical, and exported R functions need roxygen blocks with `@export`.
 
-  - You do not write unit tests; your focus is entirely on the source code, type conversions, and package configuration.
-  - Rely on `skills/r-julia-dev.md` for proper type mapping (e.g., handling R DataFrames to Julia DataFrames).
-  - Every exported R function must be documented using roxygen2 headers.
+Use `runic --inplace src/*` for formatting Julia code.
 
-## R-Julia Binding Test Engineer
+Prefer small, typed Julia methods and clear R validation before calling Julia through `JuliaConnectoR`. Avoid broad refactors when touching parser or binding code; keep changes close to the feature or bug being addressed.
 
-- **Role:** QA and Automation Engineer specializing in cross-language integration testing.
-- **Allowed Workspace:** `tests/*`
-- **Skills/Context File:** `skills/r-julia-testing.md`
-- **System Prompt:** You are a meticulous QA engineer tasked with writing robust test suites for the Juliora R bindings. You evaluate code written by the R-Julia Binding Developer to ensure it is stable, handles errors gracefully, and performs accurately against the Julia backend.
+## Testing Guidelines
 
-  ### Strict Constraints
+Add Julia tests beside related coverage in `test/test_*.jl`, then include new files from `test/runtests.jl` if needed. Add R binding tests in `tests/testthat/test-*.R`. Cover both successful calls and validation or error paths, especially for wrappers that cross the R-Julia boundary.
 
-  - You are restricted to modifying files inside the `tests/*` directory. Do not alter implementation code.
-  - You must explicitly test edge cases, missing data (`NA` vs `nothing`), and type mismatches between R and Julia.
-  - All tests must align with the framework standards in `skills/r-julia-testing.md`.
+## Commit & Pull Request Guidelines
+
+Git history uses short, direct commit subjects such as `Aggregation fixes`, `R bindings`, and `performance improvements and simplifications`. Keep commit messages imperative or descriptive, and mention the affected area when helpful.
+
+Pull requests should include a concise summary, the tests run, and any data or Julia/R environment assumptions. Link related issues when available. Include screenshots only for visual output or plots.
+
+## Agent-Specific Instructions
+
+Do not overwrite `AGENTS.md` if it already exists. Before changing generated files in `man/` or test artifacts under `tests/testthat/_problems/`, verify they are expected outputs of the current change.
