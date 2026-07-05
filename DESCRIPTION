@@ -1,6 +1,6 @@
 Package: Juliora
 Title: R Bindings for Juliora Julia Package
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: person("Franz", "Scharnreitner", email = "franz.scharnreitner@jku.at", role = c("aut", "cre"))
 Author: Franz Scharnreitner [aut, cre]
 Maintainer: Franz Scharnreitner <franz.scharnreitner@jku.at>
