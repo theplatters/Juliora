@@ -48,7 +48,8 @@ get_julia_connection <- function() {
     proj_dir <- normalizePath(proj_dir, winslash = "/", mustWork = FALSE)
     
     # Activate Julia environment and load Juliora
-    JuliaConnectoR::juliaEval(sprintf("using Pkg; Pkg.activate(%s)", shQuote(proj_dir)))
+    JuliaConnectoR::juliaEval("using Pkg")
+    JuliaConnectoR::juliaCall("Pkg.activate", proj_dir)
     JuliaConnectoR::juliaEval("using Juliora")
     JuliaConnectoR::juliaEval("using Statistics")
     
