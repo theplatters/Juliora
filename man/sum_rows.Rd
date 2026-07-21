@@ -7,13 +7,13 @@
 sum_rows(x)
 }
 \arguments{
-\item{x}{A numeric matrix.}
+\item{x}{A numeric matrix or MatrixEntry.}
 }
 \value{
 A numeric vector with one value per row of \code{x}.
 }
 \description{
-Calculate the sum of every row of a numeric matrix using the
+Calculate the sum of every row of a numeric matrix or MatrixEntry using the
 Julia backend.
 }
 \details{

@@ -318,10 +318,10 @@ solve_leontief <- function(factorization, final_demand) {
 #' Sum matrix rows
 #'
 #' @title Sum matrix rows
-#' @description Calculate the sum of every row of a numeric matrix using the
-#' Julia backend.
+#' @description Calculate the sum of every row of a numeric matrix or
+#' MatrixEntry using the Julia backend.
 #'
-#' @param x A numeric matrix.
+#' @param x A numeric matrix or MatrixEntry.
 #'
 #' @return A numeric vector with one value per row of `x`.
 #' @export
@@ -331,14 +331,18 @@ solve_leontief <- function(factorization, final_demand) {
 #' sum_rows(matrix(1:6, nrow = 2))
 #' }
 sum_rows <- function(x) {
-  if (!is.matrix(x) || !is.numeric(x)) {
-    stop("Argument 'x' must be a numeric matrix.", call. = FALSE)
+  matrix_entry <- inherits(x, "MatrixEntry")
+  if (!matrix_entry && (!is.matrix(x) || !is.numeric(x))) {
+    stop("Argument 'x' must be a numeric matrix or MatrixEntry.", call. = FALSE)
   }
 
   get_julia_connection()
 
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.sum_rows", x)
+    JuliaConnectoR::juliaCall(
+      "Juliora.sum_rows",
+      if (matrix_entry) unwrap_julia_object(x) else x
+    )
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
@@ -349,10 +353,10 @@ sum_rows <- function(x) {
 #' Sum matrix columns
 #'
 #' @title Sum matrix columns
-#' @description Calculate the sum of every column of a numeric matrix using the
-#' Julia backend.
+#' @description Calculate the sum of every column of a numeric matrix or
+#' MatrixEntry using the Julia backend.
 #'
-#' @param x A numeric matrix.
+#' @param x A numeric matrix or MatrixEntry.
 #'
 #' @return A numeric vector with one value per column of `x`.
 #' @export
@@ -362,14 +366,18 @@ sum_rows <- function(x) {
 #' sum_cols(matrix(1:6, nrow = 2))
 #' }
 sum_cols <- function(x) {
-  if (!is.matrix(x) || !is.numeric(x)) {
-    stop("Argument 'x' must be a numeric matrix.", call. = FALSE)
+  matrix_entry <- inherits(x, "MatrixEntry")
+  if (!matrix_entry && (!is.matrix(x) || !is.numeric(x))) {
+    stop("Argument 'x' must be a numeric matrix or MatrixEntry.", call. = FALSE)
   }
 
   get_julia_connection()
 
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.sum_cols", x)
+    JuliaConnectoR::juliaCall(
+      "Juliora.sum_cols",
+      if (matrix_entry) unwrap_julia_object(x) else x
+    )
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })

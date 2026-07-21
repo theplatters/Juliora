@@ -7,13 +7,13 @@
 sum_cols(x)
 }
 \arguments{
-\item{x}{A numeric matrix.}
+\item{x}{A numeric matrix or MatrixEntry.}
 }
 \value{
 A numeric vector with one value per column of \code{x}.
 }
 \description{
-Calculate the sum of every column of a numeric matrix using the
+Calculate the sum of every column of a numeric matrix or MatrixEntry using the
 Julia backend.
 }
 \details{

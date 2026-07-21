@@ -35,6 +35,7 @@ end
 Return the sum of each row of a numeric matrix as a vector.
 """
 sum_rows(x::AbstractMatrix{<:Number}) = vec(sum(x; dims = 2))
+sum_rows(x::MatrixEntry) = sum_rows(x.data)
 
 """
     sum_cols(x::AbstractMatrix{<:Number})
@@ -42,6 +43,7 @@ sum_rows(x::AbstractMatrix{<:Number}) = vec(sum(x; dims = 2))
 Return the sum of each column of a numeric matrix as a vector.
 """
 sum_cols(x::AbstractMatrix{<:Number}) = vec(sum(x; dims = 1))
+sum_cols(x::MatrixEntry) = sum_cols(x.data)
 
 function Base.getproperty(m::LeontiefFactorization, sym::Symbol)
     if sym === :data

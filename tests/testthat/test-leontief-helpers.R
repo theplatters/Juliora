@@ -83,6 +83,16 @@ test_that("sum_rows and sum_cols preserve matrix orientation", {
   expect_equal(sum_cols(decimal_values), colSums(decimal_values))
 })
 
+test_that("sum_rows and sum_cols accept MatrixEntry objects", {
+  values <- matrix(as.numeric(1:6), nrow = 2, byrow = TRUE)
+  rows <- data.frame(Row = c("A", "B"))
+  cols <- data.frame(Column = c("X", "Y", "Z"))
+  entry <- MatrixEntry(values, cols, rows)
+
+  expect_equal(sum_rows(entry), c(6, 15))
+  expect_equal(sum_cols(entry), c(5, 7, 9))
+})
+
 test_that("sum helpers validate inputs", {
   expect_error(sum_rows(c(1, 2)), "must be a numeric matrix")
   expect_error(sum_cols(data.frame(x = c(1, 2))), "must be a numeric matrix")
