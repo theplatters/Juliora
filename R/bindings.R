@@ -271,6 +271,112 @@ SeriesEntry <- function(data, col_indices) {
   wrap_julia_object(res)
 }
 
+#' Solve a Leontief system
+#'
+#' @title Solve a Leontief system
+#' @description Solve a Leontief system for one or more final-demand scenarios
+#' using an existing LeontiefFactorization.
+#'
+#' @param factorization A LeontiefFactorization object.
+#' @param final_demand A numeric vector, or a numeric matrix whose columns are
+#'   final-demand scenarios.
+#'
+#' @return A numeric vector for vector input, or a numeric matrix with the same
+#'   dimensions as `final_demand` for matrix input.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' production <- solve_leontief(mrio$L, c(100, 200))
+#' scenario_production <- solve_leontief(mrio$L, matrix(c(100, 200, 50, 75), nrow = 2))
+#' }
+solve_leontief <- function(factorization, final_demand) {
+  if (!inherits(factorization, "LeontiefFactorization")) {
+    stop("Argument 'factorization' must be a LeontiefFactorization object.", call. = FALSE)
+  }
+  if (!is.numeric(final_demand) || (!is.null(dim(final_demand)) && !is.matrix(final_demand))) {
+    stop("Argument 'final_demand' must be a numeric vector or matrix.", call. = FALSE)
+  }
+
+  get_julia_connection()
+
+  matrix_input <- is.matrix(final_demand)
+  final_demand_arg <- if (matrix_input) final_demand else as.numeric(final_demand)
+  res <- tryCatch({
+    JuliaConnectoR::juliaCall(
+      "Juliora.solve_leontief",
+      unwrap_julia_object(factorization),
+      final_demand_arg
+    )
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+
+  if (matrix_input) as.matrix(res) else as.vector(res)
+}
+
+#' Sum matrix rows
+#'
+#' @title Sum matrix rows
+#' @description Calculate the sum of every row of a numeric matrix using the
+#' Julia backend.
+#'
+#' @param x A numeric matrix.
+#'
+#' @return A numeric vector with one value per row of `x`.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' sum_rows(matrix(1:6, nrow = 2))
+#' }
+sum_rows <- function(x) {
+  if (!is.matrix(x) || !is.numeric(x)) {
+    stop("Argument 'x' must be a numeric matrix.", call. = FALSE)
+  }
+
+  get_julia_connection()
+
+  res <- tryCatch({
+    JuliaConnectoR::juliaCall("Juliora.sum_rows", x)
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+
+  as.vector(res)
+}
+
+#' Sum matrix columns
+#'
+#' @title Sum matrix columns
+#' @description Calculate the sum of every column of a numeric matrix using the
+#' Julia backend.
+#'
+#' @param x A numeric matrix.
+#'
+#' @return A numeric vector with one value per column of `x`.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' sum_cols(matrix(1:6, nrow = 2))
+#' }
+sum_cols <- function(x) {
+  if (!is.matrix(x) || !is.numeric(x)) {
+    stop("Argument 'x' must be a numeric matrix.", call. = FALSE)
+  }
+
+  get_julia_connection()
+
+  res <- tryCatch({
+    JuliaConnectoR::juliaCall("Juliora.sum_cols", x)
+  }, error = function(e) {
+    stop("Julia Error: ", e$message, call. = FALSE)
+  })
+
+  as.vector(res)
+}
+
 #' Group a MatrixEntry by columns in indices
 #'
 #' @title Group MatrixEntry

@@ -13,6 +13,10 @@ using Tidier
     @testset "SeriesEntry Tests" begin
         include("test_seriesentry.jl")
     end
+
+    @testset "Leontief Factorization Tests" begin
+        include("test_leontief_factorization.jl")
+    end
     
     @testset "Boolean Indexing Tests" begin
         include("test_boolean_indexing.jl")

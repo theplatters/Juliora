@@ -17,6 +17,32 @@ function calculate_leontief_factorization(a::MatrixEntry)
     return LeontiefFactorization(lu(I_minus_A), a.col_indices, a.row_indices)
 end
 
+"""
+    solve_leontief(factorization::LeontiefFactorization, final_demand::AbstractVecOrMat{<:Number})
+
+Solve the Leontief system for a numeric final-demand vector or matrix.
+"""
+function solve_leontief(
+        factorization::LeontiefFactorization,
+        final_demand::AbstractVecOrMat{<:Number}
+    )
+    return factorization.factorization \ final_demand
+end
+
+"""
+    sum_rows(x::AbstractMatrix{<:Number})
+
+Return the sum of each row of a numeric matrix as a vector.
+"""
+sum_rows(x::AbstractMatrix{<:Number}) = vec(sum(x; dims = 2))
+
+"""
+    sum_cols(x::AbstractMatrix{<:Number})
+
+Return the sum of each column of a numeric matrix as a vector.
+"""
+sum_cols(x::AbstractMatrix{<:Number}) = vec(sum(x; dims = 1))
+
 function Base.getproperty(m::LeontiefFactorization, sym::Symbol)
     if sym === :data
         n = size(m.row_indices, 1)

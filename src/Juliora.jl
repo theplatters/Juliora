@@ -10,6 +10,7 @@ using Statistics
 
 export Eora, Gloria, MRIO, parse_gloria, parse_gloria_sut, EnvironmentalExtension, groupby, aggregate, filter_rows, filter_cols, drop, drop!
 export MatrixEntry, SeriesEntry
+export solve_leontief, sum_rows, sum_cols
 export filter_matrix, to_long_dataframe, from_long_dataframe, groupby_matrix, sum_by_country, sum_by_sector, add_calculated_column, pivot_matrix_to_wide, matrix_summary, country_summary, environmental_impact, induced_production
 export countries, country, sectors, sector, stressors, stressor
 export @filter_rows, @filter_cols, @mutate_rows, @mutate_cols, @select_rows, @select_cols, @rename_rows, @rename_cols, @slice_rows, @slice_cols
