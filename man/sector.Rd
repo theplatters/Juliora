@@ -10,10 +10,12 @@ sector(x)
 \item{x}{An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.}
 }
 \value{
-A character vector of unique sector names.
+A character vector of unique sector names, in order of first
+appearance. Missing metadata values are omitted.
 }
 \description{
-Retrieve a character vector of unique sector names available in the MRIO database or data structure.
+Alias for \code{\link[=sectors]{sectors()}}. It returns the same canonical character
+representation for Eora and Gloria databases.
 }
 \details{
 Get unique sectors in the MRIO database or data structure (alias)

@@ -1134,11 +1134,15 @@ country <- function(x) {
 #' Get unique sectors in the MRIO database or data structure
 #'
 #' @title Get available sectors
-#' @description Retrieve a character vector of unique sector names available in the MRIO database or data structure.
+#' @description Retrieve the unique sector names available in an Eora or
+#' Gloria MRIO database, or another supported Juliora data structure. Both
+#' database loaders use the same canonical `Sector` metadata field, so the
+#' result has the same representation regardless of the database source.
 #'
 #' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
 #'
-#' @return A character vector of unique sector names.
+#' @return A character vector of unique sector names, in order of first
+#' appearance. Missing metadata values are omitted.
 #' @export
 #'
 #' @examples
@@ -1161,11 +1165,13 @@ sectors <- function(x) {
 #' Get unique sectors in the MRIO database or data structure (alias)
 #'
 #' @title Get available sectors (alias)
-#' @description Retrieve a character vector of unique sector names available in the MRIO database or data structure.
+#' @description Alias for [sectors()]. It returns the same canonical character
+#' representation for Eora and Gloria databases.
 #'
 #' @param x An MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, or data.frame object.
 #'
-#' @return A character vector of unique sector names.
+#' @return A character vector of unique sector names, in order of first
+#' appearance. Missing metadata values are omitted.
 #' @export
 #'
 #' @examples

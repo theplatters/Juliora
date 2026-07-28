@@ -220,13 +220,37 @@ const country = countries
     sectors(env::EnvironmentalExtension)
     sectors(mrio::MRIO)
 
-Return a vector of unique sector names available in the data or database.
+Return sector names as an ordered `Vector{String}`.
+
+Sector metadata from both Eora and Gloria is exposed through the canonical
+`Sector` column. Duplicate names (for example, the same sector repeated for
+several countries) are returned once, in order of first appearance. Missing
+metadata values are ignored. For compatibility with generic data frames that
+only contain an `Industry` column, that column is used as a fallback.
+
+# Examples
+```julia
+sector_names = sectors(mrio)
+```
 """
+function _unique_strings(values)::Vector{String}
+    result = String[]
+    seen = Set{String}()
+    for value in skipmissing(values)
+        string_value = string(value)
+        if string_value ∉ seen
+            push!(seen, string_value)
+            push!(result, string_value)
+        end
+    end
+    return result
+end
+
 function sectors(df::DataFrame)
     if "Sector" in names(df)
-        return unique(df.Sector)
+        return _unique_strings(df.Sector)
     elseif "Industry" in names(df)
-        return unique(df.Industry)
+        return _unique_strings(df.Industry)
     else
         return String[]
     end
