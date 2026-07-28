@@ -1216,7 +1216,7 @@ version = "1.12.0"
 deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "Random", "Statistics", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
 path = "."
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
-version = "0.1.0"
+version = "0.2.0"
 
 [[deps.KernelDensity]]
 deps = ["Distributions", "DocStringExtensions", "FFTW", "Interpolations", "StatsBase"]
