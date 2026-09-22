@@ -4,3 +4,5 @@ R_libs/
 ..Rcheck/
 .agents/
 R/plots/
+tests/testthat/_problems/
+tests/testthat/testthat-problems.rds
