@@ -2,35 +2,55 @@
 
 #' Find the directory containing Project.toml
 #'
+#' Looks for a Julia project in the following order: the
+#' `juliora.julia_project` option, the `JULIORA_JULIA_PROJECT` environment
+#' variable, the installed package directory, the current working directory
+#' and its parents (including the filesystem root), and finally `"."` as a
+#' fallback.
+#'
 #' @return A character string representing the directory path.
+#' @noRd
+#' @keywords internal
 find_julia_project <- function() {
   # 1. Check option
   opt <- getOption("juliora.julia_project")
-  if (!is.null(opt) && file.exists(file.path(opt, "Project.toml"))) {
-    return(opt)
+  if (!is.null(opt) && length(opt) == 1 && nzchar(opt)) {
+    if (file.exists(file.path(opt, "Project.toml"))) {
+      return(opt)
+    }
+    warning("Option 'juliora.julia_project' points to '", opt,
+      "' which does not contain a Project.toml; ignoring it.", call. = FALSE)
   }
-  
+
   # 2. Check environment variable
   env_val <- Sys.getenv("JULIORA_JULIA_PROJECT")
-  if (nzchar(env_val) && file.exists(file.path(env_val, "Project.toml"))) {
-    return(env_val)
+  if (nzchar(env_val)) {
+    if (file.exists(file.path(env_val, "Project.toml"))) {
+      return(env_val)
+    }
+    warning("Environment variable 'JULIORA_JULIA_PROJECT' points to '", env_val,
+      "' which does not contain a Project.toml; ignoring it.", call. = FALSE)
   }
-  
+
   # 3. Check system.file (dev mode)
   pkg_dir <- system.file(package = "Juliora")
   if (nzchar(pkg_dir) && file.exists(file.path(pkg_dir, "Project.toml"))) {
     return(pkg_dir)
   }
-  
-  # 4. Check working directory and parents
+
+  # 4. Check working directory and parents, including the filesystem root
   dir <- getwd()
-  while (dir != dirname(dir)) {
+  repeat {
     if (file.exists(file.path(dir, "Project.toml"))) {
       return(dir)
     }
-    dir <- dirname(dir)
+    parent <- dirname(dir)
+    if (identical(parent, dir)) {
+      break
+    }
+    dir <- parent
   }
-  
+
   # 5. Default fallback
   return(".")
 }
@@ -38,22 +58,71 @@ find_julia_project <- function() {
 #' Get or initialize the Julia connection and load the Juliora package
 #'
 #' @return Invisible NULL.
+#' @noRd
+#' @keywords internal
 get_julia_connection <- function() {
   if (is.null(.juliora_env$juliora)) {
     if (!JuliaConnectoR::juliaSetupOk()) {
-      stop("Julia environment is not available or not properly configured.", call. = FALSE)
+      stop(
+        "Julia environment is not available or not properly configured. ",
+        "Ensure Julia is installed and reachable, and that the Julia project ",
+        "containing Juliora can be found. Set ",
+        "options(juliora.julia_project = <path>) or the JULIORA_JULIA_PROJECT ",
+        "environment variable to the directory containing Project.toml.",
+        call. = FALSE
+      )
     }
-    
+
     proj_dir <- find_julia_project()
     proj_dir <- normalizePath(proj_dir, winslash = "/", mustWork = FALSE)
-    
+
     # Activate Julia environment and load Juliora
-    JuliaConnectoR::juliaEval("using Pkg")
-    JuliaConnectoR::juliaCall("Pkg.activate", proj_dir)
-    JuliaConnectoR::juliaEval("using Juliora")
-    JuliaConnectoR::juliaEval("using Statistics")
-    
+    tryCatch({
+      JuliaConnectoR::juliaEval("using Pkg")
+      JuliaConnectoR::juliaCall("Pkg.activate", proj_dir)
+      JuliaConnectoR::juliaEval("using Juliora")
+      JuliaConnectoR::juliaEval("using Statistics")
+    }, error = function(e) {
+      stop(
+        "Failed to load Juliora in Julia: ", conditionMessage(e), " ",
+        "Ensure the Julia project containing Juliora can be found. Set ",
+        "options(juliora.julia_project = <path>) or the JULIORA_JULIA_PROJECT ",
+        "environment variable to the directory containing Project.toml.",
+        call. = FALSE
+      )
+    })
+
     .juliora_env$juliora <- TRUE
+  }
+  invisible(NULL)
+}
+
+#' Reset the cached Julia connection state
+#'
+#' @title Reset Juliora Julia connection
+#' @description Clears the cached Julia initialization flag so the next
+#'   Juliora call re-runs project discovery and reloads the Julia packages.
+#'   Optionally shuts down the Julia server process as well.
+#'
+#' @param julia_stop A logical value indicating whether to also stop the Julia
+#'   server via `JuliaConnectoR::stopJulia()` (default: FALSE).
+#'
+#' @return Invisible NULL.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' juliora_reset()
+#' juliora_reset(julia_stop = TRUE)
+#' }
+juliora_reset <- function(julia_stop = FALSE) {
+  .juliora_env$juliora <- NULL
+  if (isTRUE(julia_stop)) {
+    tryCatch({
+      JuliaConnectoR::stopJulia()
+    }, error = function(e) {
+      warning("Failed to stop the Julia server: ", conditionMessage(e), call. = FALSE)
+    })
   }
   invisible(NULL)
 }
@@ -68,13 +137,18 @@ get_julia_connection <- function() {
 
 #' Wrap Julia proxies in R S3 classes
 #'
+#' Unknown Julia types pass through unchanged deliberately: only the known
+#' Juliora container types are wrapped, everything else is returned as-is.
+#'
 #' @param proxy A JuliaProxy object.
 #' @return A wrapped object or the proxy itself.
+#' @noRd
+#' @keywords internal
 wrap_julia_object <- function(proxy) {
   if (!inherits(proxy, "JuliaProxy")) {
     return(proxy)
   }
-  
+
   jl_type <- tryCatch({
     JuliaConnectoR::juliaCall("typeof", proxy)
   }, error = function(e) {
@@ -83,23 +157,40 @@ wrap_julia_object <- function(proxy) {
   if (is.null(jl_type)) {
     return(proxy)
   }
-  
-  if (grepl("GroupedMatrixEntry", jl_type)) {
+
+  # Normalize the type name, then match exactly so that e.g.
+  # "GroupedMatrixEntry" cannot collide with "MatrixEntry" via substring
+  # matching. Type parameters are stripped FIRST (they may themselves
+  # contain module-qualified dots), then any leading module prefix.
+  type_name <- tryCatch({
+    s <- paste(as.character(jl_type), collapse = "")
+    s <- sub("\\{.*$", "", s)
+    s <- sub("^.*\\.", "", s)
+    trimws(s)
+  }, error = function(e) {
+    NULL
+  })
+  if (is.null(type_name) || length(type_name) != 1 || !nzchar(type_name)) {
+    return(proxy)
+  }
+
+  if (identical(type_name, "GroupedMatrixEntry")) {
     return(structure(list(proxy = proxy), class = "GroupedMatrixEntry"))
-  } else if (grepl("GroupedSeriesEntry", jl_type)) {
+  } else if (identical(type_name, "GroupedSeriesEntry")) {
     return(structure(list(proxy = proxy), class = "GroupedSeriesEntry"))
-  } else if (grepl("MatrixEntry", jl_type)) {
+  } else if (identical(type_name, "MatrixEntry")) {
     return(new_matrix_entry(proxy))
-  } else if (grepl("SeriesEntry", jl_type)) {
+  } else if (identical(type_name, "SeriesEntry")) {
     return(new_series_entry(proxy))
-  } else if (grepl("EnvironmentalExtension", jl_type)) {
+  } else if (identical(type_name, "EnvironmentalExtension")) {
     return(new_environmental_extension(proxy))
-  } else if (grepl("LeontiefFactorization", jl_type)) {
+  } else if (identical(type_name, "LeontiefFactorization")) {
     return(new_leontief_factorization(proxy))
-  } else if (grepl("MRIO", jl_type)) {
+  } else if (identical(type_name, "MRIO")) {
     return(new_mrio(proxy))
   }
-  
+
+  # Unknown Julia types pass through unchanged deliberately.
   return(proxy)
 }
 
@@ -107,6 +198,8 @@ wrap_julia_object <- function(proxy) {
 #'
 #' @param x An object.
 #' @return The underlying JuliaProxy or the object itself.
+#' @noRd
+#' @keywords internal
 unwrap_julia_object <- function(x) {
   if (inherits(x, "MatrixEntry")) {
     return(x$proxy)
@@ -120,6 +213,8 @@ unwrap_julia_object <- function(x) {
     return(attr(x, "julia_proxy"))
   } else if (inherits(x, "GroupedMatrixEntry")) {
     return(x$proxy)
+  } else if (inherits(x, "GroupedSeriesEntry")) {
+    return(x$proxy)
   }
   return(x)
 }
@@ -128,6 +223,8 @@ unwrap_julia_object <- function(x) {
 #'
 #' @param x A named list.
 #' @return A Julia proxy object representing a NamedTuple.
+#' @noRd
+#' @keywords internal
 to_named_tuple <- function(x) {
   if (!is.list(x) || is.null(names(x))) {
     stop("NamedTuple representation in R must be a named list.", call. = FALSE)
@@ -141,11 +238,14 @@ to_named_tuple <- function(x) {
 #'
 #' @param x A list of named lists.
 #' @return A Julia proxy object representing a Vector of NamedTuples.
+#' @noRd
+#' @keywords internal
 to_named_tuple_vector <- function(x) {
   if (!is.list(x)) {
     stop("Array of NamedTuples must be represented as a list of named lists.", call. = FALSE)
   }
   if (!is.null(names(x))) {
+    warning("Input is a named list; treating it as a single NamedTuple.", call. = FALSE)
     return(to_named_tuple(x))
   }
   
@@ -161,6 +261,8 @@ to_named_tuple_vector <- function(x) {
 #'
 #' @param proxy A JuliaProxy to wrap.
 #' @return A MatrixEntry S3 object.
+#' @noRd
+#' @keywords internal
 new_matrix_entry <- function(proxy) {
   col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
   row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
@@ -185,8 +287,12 @@ print.MatrixEntry <- function(x, ...) {
   cat("\nData Matrix (first 6 rows):\n")
   n_r <- min(6, nrow(x$row_indices))
   n_c <- min(6, nrow(x$col_indices))
+  if (n_r == 0 || n_c == 0) {
+    cat("(empty data matrix)\n")
+    return(invisible(x))
+  }
   data_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", x$proxy, JuliaConnectoR::juliaEval(":data"))
-  sub_data <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, 1:n_r, 1:n_c)
+  sub_data <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, seq_len(n_r), seq_len(n_c))
   # Convert to matrix for print formatting
   if (is.vector(sub_data)) {
     sub_data <- matrix(sub_data, nrow = n_r, ncol = n_c)
@@ -199,6 +305,8 @@ print.MatrixEntry <- function(x, ...) {
 #'
 #' @param proxy A JuliaProxy to wrap.
 #' @return A SeriesEntry S3 object.
+#' @noRd
+#' @keywords internal
 new_series_entry <- function(proxy) {
   col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
   
@@ -218,8 +326,12 @@ print.SeriesEntry <- function(x, ...) {
   print(head(x$col_indices))
   cat("\nData Vector (first 6 elements):\n")
   n_e <- min(6, nrow(x$col_indices))
+  if (n_e == 0) {
+    cat("(empty data vector)\n")
+    return(invisible(x))
+  }
   data_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", x$proxy, JuliaConnectoR::juliaEval(":data"))
-  sub_data <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, 1:n_e)
+  sub_data <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, seq_len(n_e))
   print(sub_data)
   invisible(x)
 }
@@ -228,6 +340,8 @@ print.SeriesEntry <- function(x, ...) {
 #'
 #' @param proxy A JuliaProxy to wrap.
 #' @return An EnvironmentalExtension S3 object.
+#' @noRd
+#' @keywords internal
 new_environmental_extension <- function(proxy) {
   f_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":F"))
   a_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":A"))
@@ -253,6 +367,8 @@ print.EnvironmentalExtension <- function(x, ...) {
 #'
 #' @param proxy A JuliaProxy to wrap.
 #' @return A LeontiefFactorization S3 object.
+#' @noRd
+#' @keywords internal
 new_leontief_factorization <- function(proxy) {
   col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
   row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
@@ -286,6 +402,8 @@ dim.LeontiefFactorization <- function(x) {
 #'
 #' @param proxy A JuliaProxy to wrap.
 #' @return An MRIO S3 object.
+#' @noRd
+#' @keywords internal
 new_mrio <- function(proxy) {
   structure(
     list(),
@@ -296,16 +414,18 @@ new_mrio <- function(proxy) {
 
 #' @export
 `$.MRIO` <- function(x, name) {
-  proxy <- attr(x, "julia_proxy")
-  # Map name to Julia property
-  jl_name <- name
-  if (name == "Z") {
-    jl_name <- "Z"
-  } else if (name == "Y") {
-    jl_name <- "Y"
+  valid_fields <- c("A", "T", "Z", "VA", "FD", "Y", "L", "X", "env")
+  if (!name %in% valid_fields) {
+    stop("MRIO has no field '", name, "'. Valid fields: ",
+      paste(valid_fields, collapse = ", "), ".", call. = FALSE)
   }
-  
-  prop_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(paste0(":", jl_name)))
+  proxy <- attr(x, "julia_proxy")
+
+  # `name` is validated against the fixed whitelist above, so interpolating
+  # it into a constant Julia Symbol expression is safe.
+  prop_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(paste0(":", name)))
+  # Fields that are `nothing` in Julia (e.g. `$env` or `$L` on MRIO objects
+  # built without them) arrive as NULL and pass through unchanged.
   wrap_julia_object(prop_proxy)
 }
 
@@ -467,7 +587,7 @@ names.MatrixEntry <- function(x) {
 #' @export
 `[.SeriesEntry` <- function(x, i, ...) {
   if (missing(i)) {
-    return(x$data)
+    return(JuliaConnectoR::juliaCall("Base.getproperty", x$proxy, JuliaConnectoR::juliaEval(":data")))
   }
   
   get_julia_connection()
