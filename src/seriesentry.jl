@@ -41,7 +41,7 @@ function SeriesEntry(data::T, col_indices::DataFrame) where {T}
     if length(data) != nrow(col_indices)
         throw(DimensionMismatch("data length $(length(data)) must match index DataFrame rows $(nrow(col_indices))"))
     end
-    col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
+    col_lookup = _build_lookup(col_indices, "column")
     return SeriesEntry{T}(data, col_indices, col_lookup)
 end
 
@@ -55,9 +55,28 @@ Base.length(m::SeriesEntry) = length(m.data)
 function Base.getindex(m::SeriesEntry, col_key::NamedTuple)
     col_idx = get(m.col_lookup, col_key, nothing)
 
-    isnothing(col_idx) && throw(BoundsError(m, col_key))
+    if !isnothing(col_idx)
+        return m.data[col_idx]
+    end
 
-    return m.data[col_idx]
+    # No exact match: fall back to a partial-key scan mirroring the
+    # MatrixEntry `m[:, key]` semantics (single match -> scalar value,
+    # multiple matches -> SeriesEntry subset, none -> BoundsError).
+    matched = Int64[]
+    for (full_key, idx) in m.col_lookup
+        if _partial_key_match(full_key, col_key)
+            push!(matched, idx)
+        end
+    end
+
+    isempty(matched) && throw(BoundsError(m, col_key))
+
+    sort!(matched)
+    if length(matched) == 1
+        return m.data[matched[1]]
+    else
+        return SeriesEntry(m.data[matched], m.col_indices[matched, :])
+    end
 end
 
 function Base.getindex(m::SeriesEntry, mask::AbstractVector{Bool})
