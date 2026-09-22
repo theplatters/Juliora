@@ -61,8 +61,8 @@ function MatrixEntry(data::T, col_indices::DataFrame, row_indices::DataFrame) wh
     if size(data) != expected_size
         throw(DimensionMismatch("data $(size(data)) dimensions must match index DataFrames $expected_size"))
     end
-    row_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(row_indices)))
-    col_lookup = Dict(NamedTuple(row) => i for (i, row) in enumerate(eachrow(col_indices)))
+    row_lookup = _build_lookup(row_indices, "row")
+    col_lookup = _build_lookup(col_indices, "column")
     return MatrixEntry{T}(data, col_indices, row_indices, row_lookup, col_lookup)
 end
 
@@ -141,7 +141,7 @@ function Base.getindex(m::AbstractMatrixEntry, row_key::NamedTuple, ::Colon)
     # Find all rows that match the partial key
     row_indices_set = Set{Int64}()
     for (full_key, idx) in m.row_lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == row_key[k], keys(row_key))
+        if _partial_key_match(full_key, row_key)
             push!(row_indices_set, idx)
         end
     end
@@ -175,7 +175,7 @@ function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_key::NamedTuple)
     # Find all columns that match the partial key
     col_indices_set = Set{Int64}()
     for (full_key, idx) in m.col_lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == col_key[k], keys(col_key))
+        if _partial_key_match(full_key, col_key)
             push!(col_indices_set, idx)
         end
     end
@@ -210,7 +210,7 @@ function Base.getindex(m::AbstractMatrixEntry, ::Colon, col_key::AbstractArray{T
     col_indices_set = Set{Int64}()
     for key in col_key
         for (full_key, idx) in m.col_lookup
-            if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
+            if _partial_key_match(full_key, key)
                 push!(col_indices_set, idx)
             end
         end
@@ -247,7 +247,7 @@ function Base.getindex(m::AbstractMatrixEntry, row_key::AbstractArray{T}, ::Colo
     row_indices_set = Set{Int64}()
     for key in row_key
         for (full_key, idx) in m.row_lookup
-            if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
+            if _partial_key_match(full_key, key)
                 push!(row_indices_set, idx)
             end
         end
@@ -502,9 +502,9 @@ function filter_cols(m::AbstractMatrixEntry, condition_func)
     return m[:, col_mask]
 end
 
-function Base.filter(fun::Function, m::MatrixEntry; dims::Int = 1)
-    if dims > 2 || dims < 1
-        throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+function Base.filter(fun::Function, m::AbstractMatrixEntry; dims::Int = 1)
+    if dims != 1 && dims != 2
+        throw(ArgumentError("dims must be 1 or 2, got $dims"))
     end
     if dims == 1
         return filter_rows(m, fun)
@@ -535,6 +535,19 @@ end
 function aggregate(gm::GroupedMatrixEntry, func::Function = sum)
     ind = groupindices(gm.grouped)
     groups = unique(ind)
+    if isempty(groups)
+        # Aggregating zero groups: return a correctly-typed empty result that
+        # preserves the container invariants instead of throwing on reduce.
+        if gm.dims == 1
+            new_data_matrix = zeros(Float64, 0, size(gm.original.data, 2))
+            new_row_indices = select(gm.original.row_indices, groupcols(gm.grouped))[Int[], :]
+            return MatrixEntry(new_data_matrix, gm.original.col_indices, new_row_indices)
+        else
+            new_data_matrix = zeros(Float64, size(gm.original.data, 1), 0)
+            new_col_indices = select(gm.original.col_indices, groupcols(gm.grouped))[Int[], :]
+            return MatrixEntry(new_data_matrix, new_col_indices, gm.original.row_indices)
+        end
+    end
     if gm.dims == 1
         new_data_matrix = reduce(vcat, [func(gm.original.data[ind .== g, :], dims = 1) for g in groups])
         new_row_indices = unique(select(gm.original.row_indices, groupcols(gm.grouped)))
@@ -547,79 +560,161 @@ function aggregate(gm::GroupedMatrixEntry, func::Function = sum)
     end
 end
 
-function drop(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
-    if dims < 1 || dims > 2
-        throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+"""
+    _check_invariants(m::MatrixEntry)
+
+Internal helper: verify `size(m.data) == (nrow(m.row_indices), nrow(m.col_indices))`
+after a mutating operation, so aliasing or lookup bugs surface immediately.
+"""
+function _check_invariants(m::MatrixEntry)
+    expected = (nrow(m.row_indices), nrow(m.col_indices))
+    if size(m.data) != expected
+        throw(ErrorException("MatrixEntry invariant violated: data size $(size(m.data)) does not match index dimensions $expected"))
+    end
+    return true
+end
+
+function drop(m::AbstractMatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
+    if dims != 1 && dims != 2
+        throw(ArgumentError("dims must be 1 or 2, got $dims"))
     end
 
-    indices_set = trues(size(m.data, dims))
+    keep = trues(size(m.data, dims))
 
+    matched = false
     lookup = dims == 1 ? m.row_lookup : m.col_lookup
     for (full_key, idx) in lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == indices[k], keys(indices))
-            indices_set[idx] = false
+        if _partial_key_match(full_key, indices)
+            keep[idx] = false
+            matched = true
         end
     end
+    matched || throw(BoundsError(m, indices))
 
-    dims == 1 && return m[indices_set, :]
-    return dims == 2 && return m[:, indices_set]
+    if dims == 1
+        return m[keep, :]
+    else
+        return m[:, keep]
+    end
 end
 
 
-function drop(m::MatrixEntry, row_key::AbstractArray{T}; dims = 1) where {T <: NamedTuple}
-    if dims < 1 || dims > 2
-        throw(BoundsError("Dimension not  supported, dims should either be 1 or 2, $dims was given"))
+function drop(m::AbstractMatrixEntry, row_key::AbstractArray{T}; dims = 1) where {T <: NamedTuple}
+    if dims != 1 && dims != 2
+        throw(ArgumentError("dims must be 1 or 2, got $dims"))
     end
 
-    indices_set = trues(size(m.data, dims))
+    keep = trues(size(m.data, dims))
 
     lookup = dims == 1 ? m.row_lookup : m.col_lookup
-    for (i, key) in enumerate(row_key)
+    matched_any = false
+    unmatched = NamedTuple[]
+    for key in row_key
+        matched_key = false
         for (full_key, idx) in lookup
-            if all(k -> haskey(full_key, k) && full_key[k] == key[k], keys(key))
-                indices_set[idx] = false
+            if _partial_key_match(full_key, key)
+                keep[idx] = false
+                matched_key = true
             end
         end
-    end
-
-    dims == 1 && return m[indices_set, :]
-    return dims == 2 && return m[:, indices_set]
-
-end
-function drop!(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
-    if dims < 1 || dims > 2
-        throw(BoundsError("Dimension not supported, dims should either be 1 or 2, $dims was given"))
-    end
-
-    # Find indices to keep (opposite of drop)
-    indices_to_keep = trues(size(m.data, dims))
-
-    lookup = dims == 1 ? m.row_lookup : m.col_lookup
-    for (full_key, idx) in lookup
-        if all(k -> haskey(full_key, k) && full_key[k] == indices[k], keys(indices))
-            indices_to_keep[idx] = false
+        if matched_key
+            matched_any = true
+        else
+            push!(unmatched, key)
         end
+    end
+    matched_any || throw(BoundsError(m, row_key))
+    if !isempty(unmatched)
+        @warn "drop: some keys matched nothing and were ignored" unmatched_keys = unmatched
     end
 
     if dims == 1
-        # Drop rows
-        m.data = m.data[indices_to_keep, :]
-        deleteat!(m.row_indices, .!indices_to_keep)
-
-        empty!(m.row_lookup)
-        for (i, row) in enumerate(eachrow(m.row_indices))
-            m.row_lookup[NamedTuple(row)] = i
-        end
+        return m[keep, :]
     else
-        # Drop columns
-        m.data = m.data[:, indices_to_keep]
-        deleteat!(m.col_indices, .!indices_to_keep)
+        return m[:, keep]
+    end
+end
 
-        empty!(m.col_lookup)
-        for (i, row) in enumerate(eachrow(m.col_indices))
-            m.col_lookup[NamedTuple(row)] = i
+function drop!(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
+    # NB: drop! is intentionally defined only for the mutable MatrixEntry.
+    # LeontiefFactorization is immutable (and its data is a cached inverse),
+    # so in-place dropping is not meaningful for it; use non-mutating drop,
+    # which accepts any AbstractMatrixEntry, instead.
+    if dims != 1 && dims != 2
+        throw(ArgumentError("dims must be 1 or 2, got $dims"))
+    end
+
+    # Find indices to keep (opposite of drop)
+    keep = trues(size(m.data, dims))
+
+    lookup = dims == 1 ? m.row_lookup : m.col_lookup
+    matched = false
+    for (full_key, idx) in lookup
+        if _partial_key_match(full_key, indices)
+            keep[idx] = false
+            matched = true
         end
     end
+    matched || throw(BoundsError(m, indices))
+
+    # Replace (do not mutate) data and index frames: derived entries share
+    # index DataFrames by reference, so in-place `deleteat!` would corrupt
+    # parents and siblings. Rebinding keeps every other entry intact.
+    if dims == 1
+        # Drop rows
+        m.data = m.data[keep, :]
+        m.row_indices = m.row_indices[keep, :]
+        m.row_lookup = _build_lookup(m.row_indices, "row")
+    else
+        # Drop columns
+        m.data = m.data[:, keep]
+        m.col_indices = m.col_indices[keep, :]
+        m.col_lookup = _build_lookup(m.col_indices, "column")
+    end
+    _check_invariants(m)
+
+    return m
+end
+
+function drop!(m::MatrixEntry, row_key::AbstractArray{T}; dims = 1) where {T <: NamedTuple}
+    if dims != 1 && dims != 2
+        throw(ArgumentError("dims must be 1 or 2, got $dims"))
+    end
+
+    keep = trues(size(m.data, dims))
+
+    lookup = dims == 1 ? m.row_lookup : m.col_lookup
+    matched_any = false
+    unmatched = NamedTuple[]
+    for key in row_key
+        matched_key = false
+        for (full_key, idx) in lookup
+            if _partial_key_match(full_key, key)
+                keep[idx] = false
+                matched_key = true
+            end
+        end
+        if matched_key
+            matched_any = true
+        else
+            push!(unmatched, key)
+        end
+    end
+    matched_any || throw(BoundsError(m, row_key))
+    if !isempty(unmatched)
+        @warn "drop!: some keys matched nothing and were ignored" unmatched_keys = unmatched
+    end
+
+    if dims == 1
+        m.data = m.data[keep, :]
+        m.row_indices = m.row_indices[keep, :]
+        m.row_lookup = _build_lookup(m.row_indices, "row")
+    else
+        m.data = m.data[:, keep]
+        m.col_indices = m.col_indices[keep, :]
+        m.col_lookup = _build_lookup(m.col_indices, "column")
+    end
+    _check_invariants(m)
 
     return m
 end
