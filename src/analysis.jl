@@ -229,6 +229,9 @@ function groupby_matrix(
         rows = true,
         value_name = "value"
     )
+    isempty(grouping_cols) && throw(
+        ArgumentError("groupby_matrix requires at least one grouping column")
+    )
     # Resolve string aggregation names (R-binding path) to functions.
     func = agg_func isa AbstractString ? string_to_func(agg_func) : agg_func
     df = to_long_dataframe(m; value_name = value_name)
@@ -339,6 +342,7 @@ keys throw an informative `ArgumentError`. Aggregate first (e.g. with
 `groupby_matrix`) when the long-form data holds several values per key.
 """
 function pivot_matrix_to_wide(m::AbstractMatrixEntry, row_vars, col_var, value_var = "value")
+    row_vars = row_vars isa Symbol ? [row_vars] : collect(row_vars)
     df = to_long_dataframe(m; value_name = value_var)
     row_id_cols = [Symbol("row_" * string(var)) for var in row_vars]
     col_id_col = Symbol("col_" * string(col_var))
@@ -484,7 +488,9 @@ codes). When a non-empty request matches nothing, an `ArgumentError` listing
 the unmatched names is thrown; partial matches emit a `@warn` listing the
 unmatched names. Throws an `ArgumentError` when the MRIO has no Leontief
 factorization (non-square system). Accepts either the `CountryCode`/`Country`
-and `Sector`/`Industry` index columns.
+and `Sector`/`Industry` index columns. The returned `DataFrame` columns are
+always named `CountryCode` and `Sector`, even when the underlying index
+columns are named `Country`/`Industry`.
 """
 function induced_production(
         mrio::MRIO;

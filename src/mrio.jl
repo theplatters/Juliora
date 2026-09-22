@@ -180,17 +180,18 @@ end
 
 
 """
-    calculate_technical_coefficients(T::MatrixEntry, x)
+    calculate_technical_coefficients(T::MatrixEntry, x; warn_zero_output::Bool = true)
 
 Compute technical coefficients `A = T ./ x'` (column-wise division by total
 output). Zero-output sectors are guarded against `NaN`/`Inf` by dividing by
 `1.0` instead of `0.0`, so their coefficients equal the raw monetary flows; a
-single `@warn` per call reports how many such sectors exist. The numeric
-behavior is unchanged by the warning.
+single `@warn` per call reports how many such sectors exist (disable with
+`warn_zero_output = false`, e.g. for deliberate placeholder outputs). The
+numeric behavior is unchanged by the warning.
 """
-function calculate_technical_coefficients(T::MatrixEntry, x)
+function calculate_technical_coefficients(T::MatrixEntry, x; warn_zero_output::Bool = true)
     n_zero = count(v -> v == 0, x)
-    if n_zero > 0
+    if n_zero > 0 && warn_zero_output
         @warn "calculate_technical_coefficients: $n_zero of $(length(x)) sectors have zero total output; their coefficients equal raw monetary flows (division by zero guarded)"
     end
     return MatrixEntry(T.data ./ replace(x, 0.0 => 1.0)', T.col_indices, T.row_indices)
@@ -245,7 +246,7 @@ function MRIO(; Z::MatrixEntry, Y::MatrixEntry, VA::MatrixEntry)
         )
     else
         x = zeros(size(Z.data, 2))
-        a = calculate_technical_coefficients(Z, x)
+        a = calculate_technical_coefficients(Z, x; warn_zero_output = false)
         return MRIO(
             a,
             Z,
