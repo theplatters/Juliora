@@ -184,27 +184,32 @@ test_that("stats::aggregate and base::drop are not masked", {
   agg <- aggregate(grouped, "sum")
   expect_s3_class(agg, "MatrixEntry")
 
-  # NOTE: base::drop is not an S3 generic (it is `.Internal(drop(x))`), so
-  # unqualified `drop(entry, ...)` cannot dispatch; the method is called
-  # explicitly. See the H12 report note.
+  # drop is a Juliora generic; the explicit method is called here to test it
+  # directly (unqualified dispatch is covered by a separate test below).
   dropped <- drop.MatrixEntry(me, list(CountryCode = "USA"))
   expect_s3_class(dropped, "MatrixEntry")
   expect_equal(dim(dropped), c(2, 3))
   expect_equal(dropped$row_indices$CountryCode, c("CHN", "DEU"))
 })
 
-test_that("unqualified drop() cannot dispatch (base::drop is not generic)", {
-  skip("base::drop is `.Internal(drop(x))`, not an S3 generic: `drop(entry, ...)` cannot reach drop.MatrixEntry. Orchestrator decision pending (see H12 report note).")
+test_that("drop is a Juliora generic: dispatches for entries, delegates to base::drop otherwise", {
+  # base::drop behaviour is preserved for plain objects via drop.default
+  expect_identical(drop(matrix(1:4, 2)), matrix(1:4, 2))
+  expect_identical(drop(array(1:4, c(4, 1))), as.vector(1:4))
+
   skip_if_not(is_julia_available(), "Julia environment not available for testing")
   me <- make_core_entry()
+  # unqualified drop() now dispatches to drop.MatrixEntry
   dropped <- drop(me, list(CountryCode = "USA"))
+  expect_s3_class(dropped, "MatrixEntry")
   expect_equal(dim(dropped), c(2, 3))
+  expect_equal(dropped$row_indices$CountryCode, c("CHN", "DEU"))
 })
 
 test_that("drop validates vectorized and NA dims", {
   mock <- structure(list(), class = "MatrixEntry")
 
-  # base::drop is not generic, so the methods are invoked explicitly here.
+  # drop is a Juliora generic; explicit method calls used here to test validation.
   expect_error(drop.MatrixEntry(mock, list(a = 1), dims = c(1, 2)), "must be 1 or 2")
   expect_error(drop.MatrixEntry(mock, list(a = 1), dims = NA), "must be 1 or 2")
 

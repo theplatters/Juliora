@@ -566,6 +566,32 @@ filter_cols <- function(m, condition_func) {
   wrap_julia_object(res)
 }
 
+#' Drop redundant dimensions, or drop rows/columns from Juliora objects
+#'
+#' @title Drop
+#' @description An S3 generic. For base R objects (matrices, arrays) it delegates
+#'   to [base::drop] and removes length-1 dimensions. For Juliora objects
+#'   (`MatrixEntry`, `LeontiefFactorization`) it drops rows or columns selected by
+#'   a named list (NamedTuple) or list of named lists. Defining `drop` as a
+#'   generic (with a `default` that calls [base::drop]) preserves the base R
+#'   behaviour of `drop(x)` while enabling dispatch for Juliora types.
+#'
+#' @param x An R object, or a `MatrixEntry`/`LeontiefFactorization`.
+#' @param ... Further arguments passed to methods.
+#'
+#' @return For base objects, the object with length-1 dimensions dropped. For
+#'   Juliora objects, a new object with the selected rows/columns removed.
+#' @export
+drop <- function(x, ...) {
+  UseMethod("drop")
+}
+
+#' @rdname drop
+#' @export
+drop.default <- function(x, ...) {
+  base::drop(x)
+}
+
 #' Drop rows or columns from a MatrixEntry
 #'
 #' @title Drop rows or columns
@@ -577,7 +603,7 @@ filter_cols <- function(m, condition_func) {
 #' @param ... Unused, for S3 consistency with \code{\link[base]{drop}}.
 #'
 #' @return A MatrixEntry object.
-#' @exportS3Method base::drop
+#' @export
 #'
 #' @examples
 #' \dontrun{
@@ -605,7 +631,7 @@ drop.MatrixEntry <- function(x, indices, dims = 1, ...) {
 #' @param ... Unused, for S3 consistency with \code{\link[base]{drop}}.
 #'
 #' @return A LeontiefFactorization object.
-#' @exportS3Method base::drop
+#' @export
 #'
 #' @examples
 #' \dontrun{
@@ -865,10 +891,14 @@ groupby_matrix <- function(m, ..., agg_func = "sum", rows = TRUE, value_name = "
     stop("Argument 'agg_func' must be a function or a character string naming a Julia function.", call. = FALSE)
   }
 
+  # Pass the grouping columns as a single list of Julia Symbols (delivered as
+  # one Vector{Symbol}), matching the Julia `groupby_matrix(::AbstractVector)`
+  # method — the same mechanism the working `groupby` wrapper uses. Splicing
+  # them as separate varargs mis-serializes across JuliaConnectoR.
   grouping_cols_jl <- lapply(grouping_cols, function(col) JuliaConnectoR::juliaCall("Symbol", col))
-  
+
   res <- tryCatch({
-    do.call(JuliaConnectoR::juliaCall, c(list("Juliora.groupby_matrix", unwrap_julia_object(m)), grouping_cols_jl, list(agg_func = agg_func_jl, rows = rows, value_name = value_name)))
+    JuliaConnectoR::juliaCall("Juliora.groupby_matrix", unwrap_julia_object(m), grouping_cols_jl, agg_func = agg_func_jl, rows = rows, value_name = value_name)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })

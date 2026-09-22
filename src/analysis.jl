@@ -244,6 +244,19 @@ function groupby_matrix(
     return DataFrames.combine(DataFrames.groupby(df, group_cols), Symbol(value_name) => func => Symbol(value_name))
 end
 
+# Convenience method accepting the grouping columns as a single vector. This is
+# the path used by the R bindings, which pass one Vector{Symbol} argument rather
+# than splicing varargs. The positional signature differs from the varargs
+# method above (AbstractVector vs Vararg), so the two coexist without conflict.
+function groupby_matrix(
+        m::AbstractMatrixEntry, grouping_cols::AbstractVector;
+        agg_func = sum,
+        rows = true,
+        value_name = "value"
+    )
+    return groupby_matrix(m, grouping_cols...; agg_func = agg_func, rows = rows, value_name = value_name)
+end
+
 """
     sum_by_country(m::AbstractMatrixEntry; dimension=:both)
 

@@ -280,6 +280,25 @@ to_named_tuple_vector <- function(x) {
   NULL
 }
 
+# JuliaConnectoR's `as.data.frame` for a Julia DataFrame sanitizes non-syntactic
+# column names (e.g. "VA share (%)" -> "VA.share....", via R's default
+# check.names = TRUE). Fetch the original names from Julia (strings round-trip
+# unsanitized) and restore them so index data.frames keep the exact labels used
+# on the Julia side. Falls back to the sanitized frame if names cannot be read.
+#' @noRd
+#' @keywords internal
+.julia_df_to_dataframe <- function(df_proxy) {
+  df <- as.data.frame(df_proxy)
+  nm <- tryCatch(
+    as.character(JuliaConnectoR::juliaCall("names", df_proxy)),
+    error = function(e) NULL
+  )
+  if (!is.null(nm) && length(nm) == ncol(df)) {
+    names(df) <- nm
+  }
+  df
+}
+
 # --- S3 Constructors and Methods ---
 
 #' Create a MatrixEntry R object
@@ -289,8 +308,8 @@ to_named_tuple_vector <- function(x) {
 #' @noRd
 #' @keywords internal
 new_matrix_entry <- function(proxy) {
-  col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
-  row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
+  col_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
+  row_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
   
   structure(
     list(
@@ -333,7 +352,7 @@ print.MatrixEntry <- function(x, ...) {
 #' @noRd
 #' @keywords internal
 new_series_entry <- function(proxy) {
-  col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
+  col_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
   
   structure(
     list(
@@ -395,8 +414,8 @@ print.EnvironmentalExtension <- function(x, ...) {
 #' @noRd
 #' @keywords internal
 new_leontief_factorization <- function(proxy) {
-  col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
-  row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
+  col_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":col_indices")))
+  row_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", proxy, JuliaConnectoR::juliaEval(":row_indices")))
   
   structure(
     list(
