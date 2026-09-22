@@ -64,8 +64,8 @@ function filter_eora(
     )
 
     filtered_VA = IO.MatrixEntry(
-        eora.VA.data[:, row_mask],
-        eora.VA.col_indices[row_mask, :],
+        eora.VA.data[:, col_mask],
+        eora.VA.col_indices[col_mask, :],
         eora.VA.row_indices
     )
 
@@ -437,3 +437,116 @@ end
     end
 end
 
+
+@testset "MRIO Keyword Constructor Honesty" begin
+    sec_idx = DataFrame(CountryCode = ["USA", "CHN"], Sector = ["Agr", "Man"])
+    fd_idx = DataFrame(CountryCode = ["USA", "CHN"])
+    va_idx = DataFrame(Category = ["Compensation"])
+
+    @testset "square system has real L/X and no env" begin
+        z = IO.MatrixEntry([10.0 2.0; 3.0 15.0], sec_idx, sec_idx)
+        y = IO.MatrixEntry([5.0 1.0; 2.0 8.0], fd_idx, sec_idx)
+        va = IO.MatrixEntry([2.0 3.0], sec_idx, va_idx)
+        m = MRIO(Z = z, Y = y, VA = va)
+        @test m.env === nothing
+        @test m.L isa Juliora.LeontiefFactorization
+        @test m.X.data ≈ [18.0, 28.0]
+        @test stressors(m) == String[]
+        @test_throws ArgumentError environmental_impact(m, [1.0, 2.0])
+        @test_throws ArgumentError environmental_impact(m, SeriesEntry([1.0, 2.0], sec_idx))
+        @test_throws ArgumentError environmental_impact(m, [1.0 2.0; 3.0 4.0])
+        # induced_production works on square systems with real L
+        df = induced_production(m)
+        @test nrow(df) == 2
+    end
+
+    @testset "non-square system has no L and no env" begin
+        z = IO.MatrixEntry([10.0 2.0 3.0; 4.0 5.0 6.0], DataFrame(CountryCode = ["USA", "CHN", "DEU"]), sec_idx)
+        y = IO.MatrixEntry(reshape([5.0, 6.0], 2, 1), DataFrame(Category = ["HH"]), sec_idx)
+        va = IO.MatrixEntry([2.0 3.0 1.0], DataFrame(CountryCode = ["USA", "CHN", "DEU"]), va_idx)
+        m = MRIO(Z = z, Y = y, VA = va)
+        @test m.env === nothing
+        @test m.L === nothing
+        @test m.X.data == zeros(3)
+        @test m.A.data == z.data  # zero output guard keeps raw flows
+        @test_throws ArgumentError environmental_impact(m, [1.0, 2.0, 3.0])
+        @test_throws ArgumentError induced_production(m)
+    end
+
+    @testset "cross-field validation" begin
+        z = IO.MatrixEntry([10.0 2.0; 3.0 15.0], sec_idx, sec_idx)
+        y_bad = IO.MatrixEntry([5.0 1.0; 2.0 8.0; 1.0 1.0], fd_idx, DataFrame(CountryCode = ["USA", "CHN", "DEU"]))
+        va = IO.MatrixEntry([2.0 3.0], sec_idx, va_idx)
+        @test_throws DimensionMismatch MRIO(Z = z, Y = y_bad, VA = va)
+        y = IO.MatrixEntry([5.0 1.0; 2.0 8.0], fd_idx, sec_idx)
+        va_bad = IO.MatrixEntry([2.0 3.0 1.0], DataFrame(CountryCode = ["USA", "CHN", "DEU"]), va_idx)
+        @test_throws DimensionMismatch MRIO(Z = z, Y = y, VA = va_bad)
+    end
+
+    @testset "zero-output sectors warn but keep raw flows" begin
+        z = IO.MatrixEntry([10.0 2.0; 3.0 15.0], sec_idx, sec_idx)
+        a = @test_logs (:warn,) IO.calculate_technical_coefficients(z, [10.0, 0.0])
+        @test a.data[:, 2] == [2.0, 15.0]
+        @test_logs IO.calculate_technical_coefficients(z, [10.0, 20.0])
+    end
+
+    @testset "Eora path validation" begin
+        @test_throws ArgumentError Eora("/tmp/opencode/wp2-nonexistent-dir/")
+        mktempdir() do dir
+            @test_throws ArgumentError Eora(dir)
+        end
+    end
+end
+
+@testset "Eora File Loading Layout" begin
+    function write_eora_fixture(dir; va_cols = 2, q_cols = 2)
+        mkpath(dir)
+        open(joinpath(dir, "T.txt"), "w") do io
+            write(io, "1.0,2.0\n3.0,4.0\n")
+        end
+        open(joinpath(dir, "VA.txt"), "w") do io
+            write(io, join(fill("10.0", va_cols), ",") * "\n")
+        end
+        open(joinpath(dir, "FD.txt"), "w") do io
+            write(io, "5.0,6.0\n7.0,8.0\n")
+        end
+        open(joinpath(dir, "labels_T.txt"), "w") do io
+            write(io, "1\tUSA\tAgr\tPrimary\n2\tCHN\tMan\tSecondary\n")
+        end
+        open(joinpath(dir, "labels_VA.txt"), "w") do io
+            write(io, "1\tCompensation\n")
+        end
+        open(joinpath(dir, "labels_FD.txt"), "w") do io
+            write(io, "1\tUSA\tHH\tC1\n2\tCHN\tHH\tC2\n")
+        end
+        open(joinpath(dir, "Q.txt"), "w") do io
+            write(io, join(fill("0.5", q_cols), ",") * "\n")
+        end
+        open(joinpath(dir, "labels_Q.txt"), "w") do io
+            write(io, "CO2\tFossil\n")
+        end
+    end
+
+    mktempdir() do dir
+        write_eora_fixture(dir)
+        # Works with and without trailing slash (joinpath)
+        e1 = Eora(dir)
+        e2 = Eora(dir * "/")
+        @test e1 isa MRIO
+        @test size(e1.T.data) == (2, 2)
+        @test size(e1.VA.data) == (1, 2)
+        @test size(e1.FD.data) == (2, 2)
+        @test size(e1.env.F.data) == (1, 2)
+        @test e2.T.data == e1.T.data
+    end
+
+    mktempdir() do dir
+        write_eora_fixture(dir; va_cols = 3)
+        @test_throws DimensionMismatch Eora(dir)
+    end
+
+    mktempdir() do dir
+        write_eora_fixture(dir; q_cols = 3)
+        @test_throws DimensionMismatch Eora(dir)
+    end
+end

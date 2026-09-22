@@ -8,24 +8,35 @@ Complete global multi-region input-output (MRIO) database structure.
 - `T::MatrixEntry`: Intermediate transaction matrix (monetary flows between sectors)
 - `VA::MatrixEntry`: Value added matrix (primary inputs by sector)
 - `FD::MatrixEntry`: Final demand matrix (consumption, investment, government, exports)
-- `L::LeontiefFactorization`: Leontief inverse matrix (total requirements matrix)
-- `X::SeriesEntry`: Total output vector by sector
-- `env::EnvironmentalExtension`: Environmental impact data
+- `L::Union{LeontiefFactorization,Nothing}`: Leontief factorization (lu of I-A), nothing for non-square systems
+- `X::SeriesEntry`: Total output vector by sector (a zero vector for non-square systems built via the keyword constructor)
+- `env::Union{EnvironmentalExtension,Nothing}`: Environmental impact data, nothing when constructed without environmental data
 
 
 # Matrix Dimensions
 All matrices share consistent country-sector dimensions, typically:
 - Rows/Columns: Countries × Sectors (e.g., 189 countries × 26 sectors)
 - Environmental: Stressors × (Countries × Sectors)
+
+# Keyword Constructor
+`MRIO(; Z, Y, VA)` builds a database from transaction (`Z`), final demand
+(`Y`), and value added (`VA`) matrices. It validates that
+`size(Y.data, 1) == size(Z.data, 1)` and `size(VA.data, 2) == size(Z.data, 2)`
+and throws a `DimensionMismatch` otherwise. Square systems get real `A`/`L`/`X`
+values; non-square systems get `L = nothing` and a zero `X` vector (so `A`
+equals the raw monetary flows, see `calculate_technical_coefficients`). The
+keyword constructor never fabricates environmental data: `env` is always
+`nothing`, and `environmental_impact`/`induced_production` throw a clear
+`ArgumentError` when the data they need is absent.
 """
 struct MRIO
     A::MatrixEntry
     T::MatrixEntry
     VA::MatrixEntry
     FD::MatrixEntry
-    L::LeontiefFactorization
+    L::Union{LeontiefFactorization, Nothing}
     X::SeriesEntry
-    env::EnvironmentalExtension
+    env::Union{EnvironmentalExtension, Nothing}
 end
 
 """
@@ -38,15 +49,20 @@ Load and construct complete Eora MRIO database from file directory.
 
 # Required Files
 - `T.txt`: Intermediate transactions matrix
-- `VA.txt`: Value added matrix  
+- `VA.txt`: Value added matrix
 - `FD.txt`: Final demand matrix
 - `labels_T.txt`: Sector labels for T matrix (Country, Industry, Sector)
 - `labels_VA.txt`: Value added category labels
 - `labels_FD.txt`: Final demand category labels
 - Environmental files (Q.txt, labels_Q.txt) for environmental extension
 
+# File Layout Requirement
+`VA.txt` columns and `Q.txt` columns must align one-to-one with the rows of
+`T.txt` (one column per `T` row, including the `ROW` aggregate region, which
+is filtered out during loading). A `DimensionMismatch` is thrown otherwise.
+
 # Returns
-- `Eora`: Complete MRIO database with all matrices and environmental data
+- `MRIO`: Complete MRIO database with all matrices and environmental data
 
 # Calculations Performed
 - Technical coefficients: A = T ./ x (where x is total output)
@@ -71,19 +87,23 @@ manufacturing_linkages = filter_rows(eora.A, row -> row.Sector == "Manufacturing
 ```
 """
 function Eora(path::String)
+    isdir(path) || throw(ArgumentError("Eora database directory does not exist: $path"))
+    required_files = ["T.txt", "labels_T.txt", "VA.txt", "labels_VA.txt", "FD.txt", "labels_FD.txt", "Q.txt", "labels_Q.txt"]
+    missing_files = filter(f -> !isfile(joinpath(path, f)), required_files)
+    isempty(missing_files) || throw(ArgumentError("Eora database directory $path is missing required files: $(join(missing_files, ", "))"))
     # Parallel file reading using Threads.@spawn
-    t_task = Threads.@spawn CSV.read(path * "T.txt", Tables.matrix, header = false)
-    t_indices_task = Threads.@spawn @chain read_csv(path * "labels_T.txt", delim = "\t", col_names = false) begin
+    t_task = Threads.@spawn CSV.read(joinpath(path, "T.txt"), Tables.matrix, header = false)
+    t_indices_task = Threads.@spawn @chain read_csv(joinpath(path, "labels_T.txt"), delim = "\t", col_names = false) begin
         @select(CountryCode = Column2, Industry = Column3, Sector = Column4)
     end
 
-    v_task = Threads.@spawn CSV.read(path * "VA.txt", Tables.matrix, header = false)
-    v_colnames_task = Threads.@spawn @chain read_csv(path * "labels_VA.txt", delim = "\t", col_names = false) begin
+    v_task = Threads.@spawn CSV.read(joinpath(path, "VA.txt"), Tables.matrix, header = false)
+    v_colnames_task = Threads.@spawn @chain read_csv(joinpath(path, "labels_VA.txt"), delim = "\t", col_names = false) begin
         @select(PrimaryInput = Column2)
     end
 
-    y_task = Threads.@spawn CSV.read(path * "FD.txt", Tables.matrix, header = false)
-    y_indices_task = Threads.@spawn @chain read_csv(path * "labels_FD.txt", delim = "\t", col_names = false) begin
+    y_task = Threads.@spawn CSV.read(joinpath(path, "FD.txt"), Tables.matrix, header = false)
+    y_indices_task = Threads.@spawn @chain read_csv(joinpath(path, "labels_FD.txt"), delim = "\t", col_names = false) begin
         @select(CountryCode = Column2, Industry = Column3, Category = Column4)
     end
 
@@ -106,6 +126,13 @@ function Eora(path::String)
     l = calculate_leontief_factorization(a)
     v = fetch(v_task)
     v_colnames = fetch(v_colnames_task)
+    size(v, 2) == size(t_matrix, 1) || throw(
+        DimensionMismatch(
+            "VA.txt has $(size(v, 2)) columns but T has $(size(t_matrix, 1)) rows; " *
+                "VA.txt columns must align one-to-one with T rows (one column per T row, " *
+                "including the ROW aggregate region, which is filtered out during loading)"
+        )
+    )
 
     return MRIO(
         a,
@@ -152,8 +179,22 @@ function Gloria(path::String)
 end
 
 
-calculate_leontief_inverse(a::MatrixEntry) = MatrixEntry(inv(I - a.data), a.col_indices, a.row_indices)
-calculate_technical_coefficients(T::MatrixEntry, x) = MatrixEntry(T.data ./ replace(x, 0.0 => 1.0)', T.col_indices, T.row_indices)
+"""
+    calculate_technical_coefficients(T::MatrixEntry, x)
+
+Compute technical coefficients `A = T ./ x'` (column-wise division by total
+output). Zero-output sectors are guarded against `NaN`/`Inf` by dividing by
+`1.0` instead of `0.0`, so their coefficients equal the raw monetary flows; a
+single `@warn` per call reports how many such sectors exist. The numeric
+behavior is unchanged by the warning.
+"""
+function calculate_technical_coefficients(T::MatrixEntry, x)
+    n_zero = count(v -> v == 0, x)
+    if n_zero > 0
+        @warn "calculate_technical_coefficients: $n_zero of $(length(x)) sectors have zero total output; their coefficients equal raw monetary flows (division by zero guarded)"
+    end
+    return MatrixEntry(T.data ./ replace(x, 0.0 => 1.0)', T.col_indices, T.row_indices)
+end
 function calculate_total_output(t_data, y_data)
     x = Vector{Float64}(undef, size(t_data, 1))
     @inbounds for i in 1:size(t_data, 1)
@@ -162,12 +203,37 @@ function calculate_total_output(t_data, y_data)
     return x
 end
 
+"""
+    MRIO(; Z::MatrixEntry, Y::MatrixEntry, VA::MatrixEntry)
+
+Build an `MRIO` from transaction (`Z`), final demand (`Y`), and value added
+(`VA`) matrices. Requires `size(Y.data, 1) == size(Z.data, 1)` (one final
+demand row per transaction row) and `size(VA.data, 2) == size(Z.data, 2)` (one
+value added column per transaction column); throws a `DimensionMismatch`
+otherwise. Square systems get real technical coefficients, a real Leontief
+factorization, and a real total output vector. Non-square systems get
+`L = nothing` and a zero total output vector (so `A` equals the raw monetary
+flows). The environmental extension is always `nothing`; use
+`environmental_impact` with an explicit `EnvironmentalExtension`, or build via
+`Eora`/`Gloria`/`parse_gloria`, for environmental analysis.
+"""
 function MRIO(; Z::MatrixEntry, Y::MatrixEntry, VA::MatrixEntry)
+    size(Y.data, 1) == size(Z.data, 1) || throw(
+        DimensionMismatch(
+            "Y has $(size(Y.data, 1)) rows but Z has $(size(Z.data, 1)) rows; " *
+                "Y must have one row per Z row"
+        )
+    )
+    size(VA.data, 2) == size(Z.data, 2) || throw(
+        DimensionMismatch(
+            "VA has $(size(VA.data, 2)) columns but Z has $(size(Z.data, 2)) columns; " *
+                "VA must have one column per Z column"
+        )
+    )
     if size(Z.data, 1) == size(Z.data, 2)
         x = calculate_total_output(Z.data, Y.data)
         a = calculate_technical_coefficients(Z, x)
         l = calculate_leontief_factorization(a)
-        dummy_env = EnvironmentalExtension(Z, a)
         return MRIO(
             a,
             Z,
@@ -175,21 +241,19 @@ function MRIO(; Z::MatrixEntry, Y::MatrixEntry, VA::MatrixEntry)
             Y,
             l,
             SeriesEntry(x, Z.row_indices),
-            dummy_env
+            nothing
         )
     else
         x = zeros(size(Z.data, 2))
         a = calculate_technical_coefficients(Z, x)
-        l = LeontiefFactorization(lu(Matrix{Float64}(I, 1, 1)), Z.col_indices, Z.row_indices)
-        dummy_env = EnvironmentalExtension(Z, a)
         return MRIO(
             a,
             Z,
             VA,
             Y,
-            l,
+            nothing,
             SeriesEntry(x, Z.col_indices),
-            dummy_env
+            nothing
         )
     end
 end
@@ -317,6 +381,6 @@ end
 
 stressors(s::SeriesEntry) = stressors(s.col_indices)
 stressors(env::EnvironmentalExtension) = stressors(env.F.row_indices)
-stressors(mrio::MRIO) = stressors(mrio.env)
+stressors(mrio::MRIO) = mrio.env === nothing ? String[] : stressors(mrio.env)
 
 const stressor = stressors
