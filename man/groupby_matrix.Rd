@@ -11,7 +11,11 @@ groupby_matrix(m, ..., agg_func = "sum", rows = TRUE, value_name = "value")
 
 \item{...}{Column names (symbols or character strings) to group by.}
 
-\item{agg_func}{An R function or Julia function name (default: "sum" or sum).}
+\item{agg_func}{An aggregation: a character string naming a Julia function
+(default \code{"sum"}; e.g. \code{"mean"}, \code{"median"}, \code{"std"}, \code{"var"}, \code{"min"},
+\code{"max"}), or one of the base/stats R functions \code{sum}, \code{mean}, \code{min}, \code{max},
+\code{median}, \code{var}, \code{sd} (mapped to their Julia equivalents). Any other R
+closure is forwarded as a JuliaConnectoR callback.}
 
 \item{rows}{A logical value indicating whether to group rows (TRUE) or columns (FALSE) (default: TRUE).}
 

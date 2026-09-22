@@ -4,20 +4,23 @@
 \alias{relocate.MatrixEntry}
 \title{Relocate MatrixEntry metadata columns}
 \usage{
-\method{relocate}{MatrixEntry}(.data, ..., .dims = 1)
+\method{relocate}{MatrixEntry}(.data, ..., .dims = NULL)
 }
 \arguments{
 \item{.data}{A MatrixEntry object.}
 
 \item{...}{Relocate expressions.}
 
-\item{.dims}{An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.}
+\item{.dims}{An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.}
 }
 \value{
 A MatrixEntry object.
 }
 \description{
 Relocate MatrixEntry index metadata using dplyr syntax.
+Dimension auto-detection uses variable NAMES in the expression, so
+expressions without detectable variable names (e.g. positional selection)
+cannot be auto-detected — pass \code{.dims} explicitly in those cases.
 }
 \details{
 Relocate MatrixEntry index metadata using dplyr syntax

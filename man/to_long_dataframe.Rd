@@ -12,7 +12,9 @@ to_long_dataframe(m, value_name = "value")
 \item{value_name}{A character string specifying the name of the value column (default: "value").}
 }
 \value{
-A data.frame.
+A data.frame with one row per matrix element. Row metadata columns
+are prefixed with \code{row_}, column metadata columns with \code{col_}, and the
+matrix values are in the column named \code{value_name}.
 }
 \description{
 Convert a MatrixEntry to long-form DataFrame suitable for R database/tidyverse operations.

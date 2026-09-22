@@ -14,7 +14,10 @@ parse_gloria_sut(path, year, version = 60)
 \item{version}{An integer specifying the Gloria version (default: 60).}
 }
 \value{
-An MRIO object wrapping the Julia MRIO database.
+A Julia Tuple proxy of four numeric matrices: S (supply), U (use),
+Y (final demand), VA (value added). Julia Tuples cross the R boundary as
+opaque proxies (not R lists); extract element \code{i} with
+\code{JuliaConnectoR::juliaCall("Base.getindex", x, i)}.
 }
 \description{
 Parse Gloria Supply-Use Tables (SUT) files for a given year.
@@ -24,6 +27,9 @@ Parse Gloria Supply-Use Tables (SUT) files
 }
 \examples{
 \dontrun{
-sut_db <- parse_gloria_sut("data/GLORIA/", 2019, version = 60)
+# Returns an opaque Julia Tuple proxy of four raw matrices (S, U, Y, VA),
+# not an MRIO object. Extract element i via
+# JuliaConnectoR::juliaCall("Base.getindex", sut, i).
+sut <- parse_gloria_sut("data/GLORIA/", 2019, version = 60)
 }
 }
