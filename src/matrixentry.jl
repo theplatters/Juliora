@@ -636,6 +636,10 @@ function drop(m::AbstractMatrixEntry, row_key::AbstractArray{T}; dims = 1) where
 end
 
 function drop!(m::MatrixEntry, indices::T; dims = 1) where {T <: NamedTuple}
+    # NB: drop! is intentionally defined only for the mutable MatrixEntry.
+    # LeontiefFactorization is immutable (and its data is a cached inverse),
+    # so in-place dropping is not meaningful for it; use non-mutating drop,
+    # which accepts any AbstractMatrixEntry, instead.
     if dims != 1 && dims != 2
         throw(ArgumentError("dims must be 1 or 2, got $dims"))
     end
