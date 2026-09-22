@@ -121,10 +121,34 @@ end
 """
     Gloria(path::String, version::Integer, year::Integer)
 
-Load and construct complete Gloria MRIO database from file directory.
+Load a complete GLORIA MRIO from a cache, ZIP file, or source directory.
+For `.jld2`/`.jdl2` cache files, `version` and `year` are ignored because
+the cache contains the complete serialized MRIO.
 """
 function Gloria(path::String, version::Integer, year::Integer)
+    if Parser.is_gloria_cache_path(path)
+        return Parser.load_gloria_cache(path)
+    elseif isfile(path)
+        if Parser.is_gloria_zip_path(path)
+            return Parser.parse_gloria(path, year; version = version)
+        end
+        throw(ArgumentError("Unsupported GLORIA file path (expected .zip, .jld2, or .jdl2): $path"))
+    elseif !isdir(path) && !isempty(splitext(path)[2])
+        throw(ArgumentError("Unsupported GLORIA file path (expected .zip, .jld2, or .jdl2): $path"))
+    end
     return Parser.parse_gloria(path, year; version = version)
+end
+
+"""
+    Gloria(path::String)
+
+Load a complete GLORIA MRIO from a `.jld2` or `.jdl2` cache file. Source
+directories and ZIP files require the three-argument constructor.
+"""
+function Gloria(path::String)
+    Parser.is_gloria_cache_path(path) ||
+        throw(ArgumentError("Gloria(path) accepts cache files only (.jld2 or .jdl2); provide version and year for GLORIA source data"))
+    return Parser.load_gloria_cache(path)
 end
 
 

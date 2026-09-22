@@ -8,7 +8,7 @@ using CSV
 using Statistics
 
 
-export Eora, Gloria, MRIO, parse_gloria, parse_gloria_sut, EnvironmentalExtension, groupby, aggregate, filter_rows, filter_cols, drop, drop!
+export Eora, Gloria, MRIO, parse_gloria, parse_gloria_sut, save_gloria_cache, load_gloria_cache, EnvironmentalExtension, groupby, aggregate, filter_rows, filter_cols, drop, drop!
 export MatrixEntry, SeriesEntry
 export solve_leontief, sum_rows, sum_cols
 export filter_matrix, to_long_dataframe, from_long_dataframe, groupby_matrix, sum_by_country, sum_by_sector, add_calculated_column, pivot_matrix_to_wide, matrix_summary, country_summary, environmental_impact, induced_production
@@ -43,6 +43,7 @@ include("environmental_extension.jl")
 include("mrio.jl")
 include("parsers/parsers.jl")
 using .Parser: parse_gloria, parse_gloria_sut
+using .Parser: save_gloria_cache, load_gloria_cache
 include("aggregation.jl")
 include("analysis.jl")
 include("tidier_integrations.jl")

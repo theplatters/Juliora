@@ -5,6 +5,7 @@ using ZipArchives
 using Mmap
 using Random
 using DataFrames
+using JLD2
 
 @testset "Parser Parser Rules" begin
 
@@ -176,12 +177,22 @@ using DataFrames
             end
 
             sut = P.parse_gloria_sut(tmpdir, year; version = version, price = price)
+            @test P.parse_gloria_sut(zip_path, year; version = version, price = price) == sut
             @test sut isa Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
             V, U, Y, VA = sut
             @test V == [2.0;;]
             @test U == [3.0;;]
             @test Y == [5.0 5.0 5.0 5.0 5.0 5.0]
             @test VA == [6.0; 7.0;;]
+
+            # A direct ZIP remains authoritative when an extracted sibling has
+            # conflicting data.
+            conflicting_dir = joinpath(tmpdir, "GLORIA_MRIOs_$(version)_$(year)")
+            mkpath(conflicting_dir)
+            write(joinpath(conflicting_dir, t_file), "9.0,9.0\n9.0,9.0\n")
+            write(joinpath(conflicting_dir, y_file), "0.0,0.0,0.0,0.0,0.0,0.0\n9.0,9.0,9.0,9.0,9.0,9.0\n")
+            write(joinpath(conflicting_dir, va_file), "9.0,0.0\n9.0,0.0\n")
+            @test P.parse_gloria_sut(zip_path, year; version = version, price = price)[1] == [2.0;;]
 
             # Test type stability via a helper
             function run_parse()
@@ -357,6 +368,86 @@ using DataFrames
         @test res_empty isa Juliora.MRIO
         @test size(res_empty.T.data) == (0, 0)
         @test size(res_empty.env.F.data) == (0, 0)
+    end
+end
+
+@testset "GLORIA JLD2 cache" begin
+    indices = DataFrame(CountryCode = ["AAA"], Sector = ["test"])
+    fd_indices = DataFrame(CountryCode = ["AAA"], Category = ["final"])
+    va_indices = DataFrame(CountryCode = ["AAA"], Category = ["value"])
+    mrio = Juliora.MRIO(
+        Z = Juliora.MatrixEntry([0.2;;], indices, indices),
+        Y = Juliora.MatrixEntry([1.0;;], fd_indices, indices),
+        VA = Juliora.MatrixEntry([2.0;;], va_indices, indices),
+    )
+
+    mktempdir() do tmpdir
+        cache = joinpath(tmpdir, "nested", "mrio.jld2")
+        @test Juliora.save_gloria_cache(cache, mrio) == cache
+        loaded = Juliora.load_gloria_cache(cache)
+        @test loaded isa Juliora.MRIO
+        @test loaded.T.data == mrio.T.data
+        @test loaded.A.data == mrio.A.data
+        @test loaded.VA.data == mrio.VA.data
+        @test loaded.FD.data == mrio.FD.data
+        @test loaded.X.data == mrio.X.data
+        @test loaded.env.F.data == mrio.env.F.data
+        @test loaded.T.row_indices == mrio.T.row_indices
+        @test haskey(loaded.T.row_lookup, (CountryCode = "AAA", Sector = "test"))
+        @test Juliora.solve_leontief(loaded.L, [1.0]) ≈ [1.2]
+        @test Juliora.Gloria(cache) isa Juliora.MRIO
+        @test Juliora.Gloria(cache, 60, 2019) isa Juliora.MRIO
+
+        alias = joinpath(tmpdir, "mrio.jdl2")
+        @test Juliora.save_gloria_cache(mrio, alias) == alias
+        @test Juliora.load_gloria_cache(alias).T.data == mrio.T.data
+
+        # Existing valid caches are replaced, while a directory target is not.
+        replacement = Juliora.MRIO(; Z=Juliora.MatrixEntry([0.3;;], indices, indices),
+            Y=Juliora.MatrixEntry([1.0;;], fd_indices, indices),
+            VA=Juliora.MatrixEntry([2.0;;], va_indices, indices))
+        @test Juliora.save_gloria_cache(cache, replacement) == cache
+        @test Juliora.load_gloria_cache(cache).T.data == [0.3;;]
+        directory_cache = joinpath(tmpdir, "protected.jld2")
+        mkpath(directory_cache)
+        marker = joinpath(directory_cache, "keep.txt")
+        write(marker, "keep")
+        @test_throws ArgumentError Juliora.save_gloria_cache(directory_cache, mrio)
+        @test read(marker, String) == "keep"
+        @test_throws ArgumentError Juliora.load_gloria_cache(directory_cache)
+
+        malformed = joinpath(tmpdir, "malformed.jld2")
+        write(malformed, "not a JLD2 file")
+        @test_throws Exception Juliora.load_gloria_cache(malformed)
+        wrong_schema = joinpath(tmpdir, "wrong.jld2")
+        JLD2.jldopen(wrong_schema, "w") do file
+            file["schema"] = "other"
+            file["schema_version"] = 1
+            file["mrio"] = 1
+        end
+        @test_throws ArgumentError Juliora.load_gloria_cache(wrong_schema)
+        missing_fields = joinpath(tmpdir, "missing_fields.jld2")
+        JLD2.jldopen(missing_fields, "w") do file
+            file["schema"] = "Juliora.GLORIA.MRIO"
+        end
+        @test_throws ArgumentError Juliora.load_gloria_cache(missing_fields)
+        wrong_type = joinpath(tmpdir, "wrong_type.jld2")
+        JLD2.jldopen(wrong_type, "w") do file
+            file["schema"] = "Juliora.GLORIA.MRIO"
+            file["schema_version"] = 1
+            file["mrio"] = 1
+        end
+        @test_throws ArgumentError Juliora.load_gloria_cache(wrong_type)
+        wrong_version = joinpath(tmpdir, "wrong_version.jld2")
+        JLD2.jldopen(wrong_version, "w") do file
+            file["schema"] = "Juliora.GLORIA.MRIO"
+            file["schema_version"] = 999
+            file["mrio"] = mrio
+        end
+        @test_throws ArgumentError Juliora.load_gloria_cache(wrong_version)
+        @test_throws ArgumentError Juliora.load_gloria_cache(joinpath(tmpdir, "missing.jld2"))
+        @test_throws ArgumentError Juliora.Gloria(tmpdir)
+        @test_throws ArgumentError Juliora.Gloria(joinpath(tmpdir, "input.csv"), 60, 2019)
     end
 end
 

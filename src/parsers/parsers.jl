@@ -7,9 +7,10 @@ using LinearAlgebra
 using Mmap
 using Parsers
 using XLSX
+using JLD2
 import ..Juliora: MRIO, MatrixEntry, SeriesEntry, EnvironmentalExtension, calculate_leontief_factorization, calculate_technical_coefficients
 
-export ParserError, ParserWarning, parse_gloria, parse_gloria_sut, _construct_IO
+export ParserError, ParserWarning, parse_gloria, parse_gloria_sut, save_gloria_cache, load_gloria_cache, is_gloria_cache_path, is_gloria_zip_path, _construct_IO
 
 # Custom Exceptions
 struct ParserError <: Exception
@@ -23,6 +24,79 @@ const NEW_LINE = 0x0a
 const CARRIAGE_RETURN = 0x0d
 const N_REGIONS = 164
 const N_SECTORS = 120
+
+const GLORIA_CACHE_SCHEMA = "Juliora.GLORIA.MRIO"
+const GLORIA_CACHE_VERSION = 1 # Bump when the serialized layout or required fields change.
+
+is_gloria_cache_path(path::String) = endswith(lowercase(path), ".jld2") || endswith(lowercase(path), ".jdl2")
+is_gloria_zip_path(path::String) = endswith(lowercase(path), ".zip")
+
+function _check_cache_path(path::String)
+    return is_gloria_cache_path(path) ||
+        throw(ArgumentError("GLORIA cache path must end in .jld2 (the .jdl2 alias is also accepted): $path"))
+end
+
+"""
+    save_gloria_cache(path::String, mrio::MRIO)
+
+Save the complete `MRIO` to a versioned JLD2 cache, including labels,
+environmental data, and its Leontief factorization. Creates parent
+directories and writes atomically. `.jdl2` is accepted as an alias for
+`.jld2`; returns the supplied path.
+"""
+function save_gloria_cache(path::String, mrio::MRIO)
+    _check_cache_path(path)
+    target = abspath(path)
+    isdir(target) && throw(ArgumentError("Cannot save GLORIA cache: target is a directory: $path"))
+    parent = dirname(target)
+    mkpath(parent)
+    temporary_path, temporary_io = mktemp(parent)
+    close(temporary_io)
+    try
+        jldopen(temporary_path, "w") do file
+            file["schema"] = GLORIA_CACHE_SCHEMA
+            file["schema_version"] = GLORIA_CACHE_VERSION
+            file["mrio"] = mrio
+        end
+        Base.mv(temporary_path, target; force = true)
+    catch err
+        isfile(temporary_path) && rm(temporary_path; force = true)
+        throw(ErrorException("Could not save GLORIA cache $path: $(sprint(showerror, err))"))
+    end
+    return path
+end
+
+save_gloria_cache(mrio::MRIO, path::String) = save_gloria_cache(path, mrio)
+
+"""
+    load_gloria_cache(path::String)::MRIO
+
+Load and validate a complete MRIO from a versioned `.jld2` cache. The
+`.jdl2` spelling is also accepted. Missing, malformed, incompatible, and
+non-MRIO files produce descriptive errors.
+"""
+function load_gloria_cache(path::String)::MRIO
+    _check_cache_path(path)
+    isdir(path) && throw(ArgumentError("Cannot load GLORIA cache: path is a directory: $path"))
+    isfile(path) || throw(ArgumentError("GLORIA cache file does not exist: $path"))
+    file = try
+        jldopen(path, "r")
+    catch err
+        throw(ErrorException("Malformed GLORIA cache $path: $(sprint(showerror, err))"))
+    end
+    try
+        haskey(file, "schema") && haskey(file, "schema_version") && haskey(file, "mrio") ||
+            throw(ArgumentError("GLORIA cache has the wrong schema (missing required fields): $path"))
+        file["schema"] == GLORIA_CACHE_SCHEMA && file["schema_version"] == GLORIA_CACHE_VERSION ||
+            throw(ArgumentError("Unsupported GLORIA cache schema or version in $path"))
+        mrio = file["mrio"]
+        mrio isa MRIO ||
+            throw(ArgumentError("GLORIA cache contains $(typeof(mrio)), not an MRIO: $path"))
+        return mrio
+    finally
+        close(file)
+    end
+end
 
 # Global Constants matching Python's IDX_NAMES structure
 const IDX_NAMES = Dict(
@@ -336,21 +410,25 @@ function parse_gloria_sut(path::String; year::Integer = 2019, version::Integer =
     y_file = gloria_result_file("Y", year, version, extension)
     va_file = gloria_result_file("V", year, version, extension)
 
-    # Resolve the correct base path (handling year subdirectory if needed)
-    base_path = resolve_gloria_base_path(path, year, version, t_file)
+    # A direct ZIP is authoritative; otherwise retain the historical directory search.
+    direct_zip = isfile(path) && is_gloria_zip_path(path)
+    if isfile(path) && !direct_zip
+        throw(ParserError("Unsupported GLORIA source file (expected .zip): $path"))
+    end
+    base_path = direct_zip ? dirname(path) : resolve_gloria_base_path(path, year, version, t_file)
 
     unzipped_dir = joinpath(base_path, gloria_mrios_name(version, year))
-    gloria_path = joinpath(base_path, gloria_mrios_zip_name(version, year))
+    gloria_path = direct_zip ? path : joinpath(base_path, gloria_mrios_zip_name(version, year))
 
     is_unzipped = false
     resolved_dir = ""
-    if isdir(unzipped_dir) && isfile(joinpath(unzipped_dir, t_file))
+    if !direct_zip && isdir(unzipped_dir) && isfile(joinpath(unzipped_dir, t_file))
         is_unzipped = true
         resolved_dir = unzipped_dir
-    elseif isdir(base_path) && isfile(joinpath(base_path, t_file))
+    elseif !direct_zip && isdir(base_path) && isfile(joinpath(base_path, t_file))
         is_unzipped = true
         resolved_dir = base_path
-    elseif !isfile(gloria_path)
+    elseif !direct_zip && !isfile(gloria_path)
         if isdir(base_path)
             subdirs = [joinpath(base_path, gloria_mrios_name(version, year)), base_path]
             found = false
@@ -782,9 +860,14 @@ Parses raw GLORIA SUT tables, reads Excel readme metadata, and constructs a comp
 function parse_gloria(path::String, year::Int; version = 60, price = BasePrice(), country_names = "gloria")
     # Resolve the correct base path (handling year subdirectory if needed)
     t_file = gloria_result_file("T", year, version, get_extension(price))
-    base_path = resolve_gloria_base_path(path, year, version, t_file)
+    if isfile(path) && !is_gloria_zip_path(path)
+        throw(ParserError("Unsupported GLORIA source file (expected .zip): $path"))
+    end
+    direct_zip = isfile(path) && is_gloria_zip_path(path)
+    base_path = direct_zip ? dirname(path) : resolve_gloria_base_path(path, year, version, t_file)
 
-    (S, U, Y, VA) = parse_gloria_sut(base_path; year = year, version = version, price = price)
+    sut_path = direct_zip ? path : base_path
+    (S, U, Y, VA) = parse_gloria_sut(sut_path; year = year, version = version, price = price)
 
     # Find the readme file
     gloria_meta_path = find_readme_path(base_path, version, path)
