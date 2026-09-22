@@ -448,7 +448,12 @@ groupby <- function(m, cols, dims = 1) {
 #' @description Aggregate matrix data grouped by groupby.
 #'
 #' @param x A GroupedMatrixEntry object.
-#' @param func An R function (e.g. sum, mean) or character string naming a Julia function (e.g. "sum", "mean").
+#' @param func An aggregation. Either a character string naming a Julia function
+#'   (e.g. `"sum"`, `"mean"`, `"median"`, `"std"`, `"var"`, `"min"`, `"max"`), or
+#'   one of the base/stats R functions `sum`, `mean`, `min`, `max`, `median`,
+#'   `var`, `sd` (these are mapped to their Julia equivalents). A custom R
+#'   closure is forwarded as a callback and must accept `(matrix, dims)` and
+#'   return the matrix reduced along `dims`.
 #' @param ... Unused, for S3 consistency with \code{\link[stats]{aggregate}}.
 #'
 #' @return A MatrixEntry object.
@@ -466,13 +471,16 @@ aggregate.GroupedMatrixEntry <- function(x, func, ...) {
 
   get_julia_connection()
 
-  # R closures are passed directly: JuliaConnectoR forwards them to Julia via
-  # its callback mechanism. Character strings are passed through to Julia's
-  # `aggregate` AbstractString method (resolved via `Juliora.string_to_func`).
+  # Character strings are passed through to Julia's `aggregate` AbstractString
+  # method (resolved via `Juliora.string_to_func`). Common R aggregation
+  # functions are mapped to those same strings for correct, fast reduction;
+  # any other R closure is passed directly as a JuliaConnectoR callback (it must
+  # accept `(matrix, dims)` and return a matrix reduced along `dims`).
   func_jl <- if (is.character(func) && length(func) == 1 && !is.na(func)) {
     func
   } else if (is.function(func)) {
-    func
+    mapped <- .julia_agg_name(func)
+    if (!is.null(mapped)) mapped else func
   } else {
     stop("Argument 'func' must be a function or a single character string naming a Julia function.", call. = FALSE)
   }
@@ -814,7 +822,11 @@ from_long_dataframe <- function(df, value_col = "value", row_prefix = "row_", co
 #'
 #' @param m A MatrixEntry object.
 #' @param ... Column names (symbols or character strings) to group by.
-#' @param agg_func An R function or Julia function name (default: "sum" or sum).
+#' @param agg_func An aggregation: a character string naming a Julia function
+#'   (default `"sum"`; e.g. `"mean"`, `"median"`, `"std"`, `"var"`, `"min"`,
+#'   `"max"`), or one of the base/stats R functions `sum`, `mean`, `min`, `max`,
+#'   `median`, `var`, `sd` (mapped to their Julia equivalents). Any other R
+#'   closure is forwarded as a JuliaConnectoR callback.
 #' @param rows A logical value indicating whether to group rows (TRUE) or columns (FALSE) (default: TRUE).
 #' @param value_name A character string specifying the name of the value column (default: "value").
 #'
@@ -837,15 +849,18 @@ groupby_matrix <- function(m, ..., agg_func = "sum", rows = TRUE, value_name = "
 
   get_julia_connection()
 
-  # Character aggregation names are resolved via `Juliora.string_to_func`;
-  # R closures are passed directly (JuliaConnectoR callback mechanism).
+  # Character aggregation names are passed straight through to Julia, whose
+  # groupby_matrix resolves them via `string_to_func`. Common R aggregation
+  # functions are mapped to those same names; any other closure is passed as a
+  # JuliaConnectoR callback.
   agg_func_jl <- if (is.character(agg_func)) {
     if (length(agg_func) != 1 || is.na(agg_func)) {
       stop("Argument 'agg_func' must be a single function name or a function.", call. = FALSE)
     }
-    JuliaConnectoR::juliaCall("Juliora.string_to_func", agg_func)
-  } else if (is.function(agg_func)) {
     agg_func
+  } else if (is.function(agg_func)) {
+    mapped <- .julia_agg_name(agg_func)
+    if (!is.null(mapped)) mapped else agg_func
   } else {
     stop("Argument 'agg_func' must be a function or a character string naming a Julia function.", call. = FALSE)
   }

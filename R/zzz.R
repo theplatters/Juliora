@@ -255,6 +255,31 @@ to_named_tuple_vector <- function(x) {
   JuliaConnectoR::juliaCall("Juliora.make_named_tuple_vector", keys_list, vals_list)
 }
 
+# Map common R aggregation functions to Juliora aggregation-name strings, so
+# that e.g. `aggregate(gm, sum)` and `groupby_matrix(m, :C, agg_func = mean)`
+# use Julia's fast, dimension-aware reductions (Julia calls a raw R callback as
+# `func(block; dims)` and expects a dim-reduced *matrix* back, which base R
+# `sum`/`mean` do not provide). Returns NULL for unrecognized functions; the
+# caller then falls back to passing the closure as a JuliaConnectoR callback,
+# which must accept `(matrix, dims)` and return a matrix reduced along `dims`.
+#' @noRd
+#' @keywords internal
+.julia_agg_name <- function(func) {
+  if (!is.function(func)) {
+    return(NULL)
+  }
+  b <- baseenv()
+  s <- asNamespace("stats")
+  if (identical(func, get("sum", b))) return("sum")
+  if (identical(func, get("mean", b))) return("mean")
+  if (identical(func, get("min", b))) return("min")
+  if (identical(func, get("max", b))) return("max")
+  if (identical(func, get("median", s))) return("median")
+  if (identical(func, get("var", s))) return("var")
+  if (identical(func, get("sd", s))) return("std")
+  NULL
+}
+
 # --- S3 Constructors and Methods ---
 
 #' Create a MatrixEntry R object
