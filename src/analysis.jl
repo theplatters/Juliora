@@ -218,6 +218,10 @@ end
     groupby_matrix(m::AbstractMatrixEntry, grouping_cols...; agg_func=sum, rows=true, value_name="value")
 
 Group and aggregate matrix data by specified index columns.
+
+`agg_func` may be a function or a string naming one (resolved via
+`string_to_func`, e.g. `"sum"`, `"mean"`, `"statistics.mean"`, `"base.sum"`).
+The string form is the path used by the R bindings.
 """
 function groupby_matrix(
         m::AbstractMatrixEntry, grouping_cols...;
@@ -225,6 +229,8 @@ function groupby_matrix(
         rows = true,
         value_name = "value"
     )
+    # Resolve string aggregation names (R-binding path) to functions.
+    func = agg_func isa AbstractString ? string_to_func(agg_func) : agg_func
     df = to_long_dataframe(m; value_name = value_name)
 
     # Determine which columns to group by
@@ -235,7 +241,7 @@ function groupby_matrix(
     end
 
     # Apply grouping and aggregation using pure DataFrames operations
-    return DataFrames.combine(DataFrames.groupby(df, group_cols), Symbol(value_name) => agg_func => Symbol(value_name))
+    return DataFrames.combine(DataFrames.groupby(df, group_cols), Symbol(value_name) => func => Symbol(value_name))
 end
 
 """

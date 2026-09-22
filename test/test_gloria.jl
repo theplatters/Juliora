@@ -516,11 +516,22 @@ end
     indices = DataFrame(CountryCode = ["AAA"], Sector = ["test"])
     fd_indices = DataFrame(CountryCode = ["AAA"], Category = ["final"])
     va_indices = DataFrame(CountryCode = ["AAA"], Category = ["value"])
-    mrio = Juliora.MRIO(
-        Z = Juliora.MatrixEntry([0.2;;], indices, indices),
-        Y = Juliora.MatrixEntry([1.0;;], fd_indices, indices),
-        VA = Juliora.MatrixEntry([2.0;;], va_indices, indices),
+    sat_indices = DataFrame(CountryCode = ["AAA"], Stressor = ["co2"])
+    # Build via the positional constructor so the MRIO carries a real
+    # environmental extension (the kwargs constructor honestly sets env=nothing),
+    # keeping the cache round-trip coverage for env.
+    Z_entry = Juliora.MatrixEntry([0.2;;], indices, indices)
+    Y_entry = Juliora.MatrixEntry([1.0;;], fd_indices, indices)
+    VA_entry = Juliora.MatrixEntry([2.0;;], va_indices, indices)
+    x_out = Juliora.calculate_total_output(Z_entry.data, Y_entry.data)  # [1.2]
+    A_entry = Juliora.calculate_technical_coefficients(Z_entry, x_out)
+    L_fact = Juliora.calculate_leontief_factorization(A_entry)
+    X_series = Juliora.SeriesEntry(x_out, indices)
+    env_ext = Juliora.EnvironmentalExtension(
+        Juliora.MatrixEntry([3.0;;], sat_indices, indices),
+        Juliora.MatrixEntry([0.25;;], sat_indices, indices)
     )
+    mrio = Juliora.MRIO(A_entry, Z_entry, VA_entry, Y_entry, L_fact, X_series, env_ext)
 
     mktempdir() do tmpdir
         cache = joinpath(tmpdir, "nested", "mrio.jld2")

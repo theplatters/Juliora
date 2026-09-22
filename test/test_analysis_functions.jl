@@ -118,6 +118,15 @@ end
     # Test custom value name
     custom_groups = groupby_matrix(matrix_entry, :CountryCode; value_name = "custom_value")
     @test "custom_value" in names(custom_groups)
+
+    # Test string agg_func (R-binding path via string_to_func)
+    str_groups = groupby_matrix(matrix_entry, :CountryCode; agg_func = "sum", rows = true)
+    fn_groups = groupby_matrix(matrix_entry, :CountryCode; agg_func = sum, rows = true)
+    @test str_groups == fn_groups
+    str_mean = groupby_matrix(matrix_entry, :CountryCode; agg_func = "statistics.mean", rows = true)
+    fn_mean = groupby_matrix(matrix_entry, :CountryCode; agg_func = mean, rows = true)
+    @test str_mean.value ≈ fn_mean.value
+    @test_throws ArgumentError groupby_matrix(matrix_entry, :CountryCode; agg_func = "nonsense")
     @test !("value" in names(custom_groups))
 end
 
