@@ -13,6 +13,9 @@ byte scanner and builds complete [`MRIO`](@ref) databases.
 - Every row must contain exactly the expected number of fields. Empty fields
   (two adjacent delimiters, or a delimiter at a row start/end) parse as `0.0`;
   short/long rows throw [`ParserError`](@ref).
+- Any number of trailing delimiters/whitespace after the expected field count
+  at end-of-row is tolerated (`_check_row_trailing`): values are fully
+  consumed by then, so no misalignment is possible.
 - Unparseable tokens are leniently treated as `0.0` (the whole field is
   skipped, never re-scanned mid-field), so sparse/placeholder cells do not
   abort a parse.
@@ -111,7 +114,16 @@ function load_gloria_cache(path::String)::MRIO
             throw(ArgumentError("GLORIA cache has the wrong schema (missing required fields): $path"))
         file["schema"] == GLORIA_CACHE_SCHEMA && file["schema_version"] == GLORIA_CACHE_VERSION ||
             throw(ArgumentError("Unsupported GLORIA cache schema or version in $path"))
-        mrio = file["mrio"]
+        mrio = try
+            file["mrio"]
+        catch err
+            throw(
+                ErrorException(
+                    "GLORIA cache at $path appears stale or incompatible (written by another Juliora version); " *
+                        "re-parse with parse_gloria and overwrite the cache: $(sprint(showerror, err))"
+                )
+            )
+        end
         mrio isa MRIO ||
             throw(ArgumentError("GLORIA cache contains $(typeof(mrio)), not an MRIO: $path"))
         return mrio
@@ -580,11 +592,11 @@ function _parse_sut_zip_sequence(gloria_path::String, t_file::String, y_file::St
         mmap_data = Mmap.mmap(io)
         gloria_zip = za.ZipReader(mmap_data)
 
-        y_bytes = read_entry_in_zip(gloria_zip, y_file)
+        y_bytes = read_entry_in_zip(gloria_zip, y_file, gloria_path)
         n_regions, n_sectors = detect_gloria_dims(y_bytes)
         if n_regions == 0 || n_sectors == 0
-            t_empty = length(read_entry_in_zip(gloria_zip, t_file)) == 0
-            va_empty = length(read_entry_in_zip(gloria_zip, va_file)) == 0
+            t_empty = length(read_entry_in_zip(gloria_zip, t_file, gloria_path)) == 0
+            va_empty = length(read_entry_in_zip(gloria_zip, va_file, gloria_path)) == 0
             y_bytes = nothing
             (t_empty && va_empty) ||
                 throw(ParserError("Y file $y_file is empty but T/VA entries in $gloria_path are not; cannot detect dimensions"))
@@ -592,10 +604,10 @@ function _parse_sut_zip_sequence(gloria_path::String, t_file::String, y_file::St
         end
 
         @info "Parsing T from ZIP"
-        t_bytes = read_entry_in_zip(gloria_zip, t_file)
+        t_bytes = read_entry_in_zip(gloria_zip, t_file, gloria_path)
         isempty(t_bytes) && throw(ParserError("Required GLORIA entry $t_file in $gloria_path is empty"))
         @info "Parsing VA from ZIP"
-        va_bytes = read_entry_in_zip(gloria_zip, va_file)
+        va_bytes = read_entry_in_zip(gloria_zip, va_file, gloria_path)
         isempty(va_bytes) && throw(ParserError("Required GLORIA entry $va_file in $gloria_path is empty"))
 
         validate_sut_dims(t_bytes, y_bytes, n_regions, n_sectors, t_file)
@@ -804,18 +816,19 @@ function find_file_in_dir(dir::String, suffix::String)
     throw(ParserError("Could not find file ending with $suffix in directory $dir"))
 end
 
-function find_entry_in_zip(zip_reader::za.ZipReader, suffix::String)
+function find_entry_in_zip(zip_reader::za.ZipReader, suffix::String, archive_path::String = "")
     names = za.zip_names(zip_reader)
     lsuffix = lowercase(suffix)
     idx = findfirst(n -> endswith(lowercase(n), lsuffix), names)
     if idx === nothing
-        throw(ParserError("Could not find entry ending with $suffix in ZIP"))
+        where = isempty(archive_path) ? "in ZIP" : "in ZIP archive $archive_path"
+        throw(ParserError("Could not find entry ending with $suffix $where"))
     end
     return names[idx]
 end
 
-function read_entry_in_zip(zip_reader::za.ZipReader, suffix::String)
-    return za.zip_readentry(zip_reader, find_entry_in_zip(zip_reader, suffix))
+function read_entry_in_zip(zip_reader::za.ZipReader, suffix::String, archive_path::String = "")
+    return za.zip_readentry(zip_reader, find_entry_in_zip(zip_reader, suffix, archive_path))
 end
 
 function find_readme_path(base_path::String, version::Integer, original_path::String)::String
@@ -1084,7 +1097,7 @@ end
 
 
 """
-    parse_gloria(path::String, year::Integer; version::Integer = 60, price::AbstractPrice = BasePrice(), country_names::String = "gloria")
+    parse_gloria(path::String, year::Int; version::Integer = 60, price::AbstractPrice = BasePrice(), country_names::String = "gloria")
 
 Parse raw GLORIA SUT tables for `year` found at `path` (a directory, a year
 subdirectory layout, or a direct `.zip` archive), read the Excel readme
@@ -1164,7 +1177,7 @@ function read_satellites(::Type{Zipped}, sat_path, q_suffix; n_regions, n_sector
         mmap_data = Mmap.mmap(io)
         sat_zip = za.ZipReader(mmap_data)
 
-        q_bytes = read_entry_in_zip(sat_zip, q_suffix)
+        q_bytes = read_entry_in_zip(sat_zip, q_suffix, sat_path)
 
         return parse(QFile(), q_bytes; n_regions = n_regions, n_sectors = n_sectors)
     end

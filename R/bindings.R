@@ -729,8 +729,8 @@ drop_mut <- function(m, indices, dims = 1) {
   })
   
   # Update R S3 object's native fields
-  m$col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":col_indices")))
-  m$row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":row_indices")))
+  m$col_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":col_indices")))
+  m$row_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":row_indices")))
   
   return(m)
 }
@@ -1396,7 +1396,10 @@ filter.MRIO <- function(.data, ..., .dims = 1) {
   filtered_meta <- dplyr::filter(meta, ...)
   mask <- logical(nrow(meta))
   mask[filtered_meta$.row_idx_temp] <- TRUE
-  
+  if (!any(mask)) {
+    stop("filter() on MRIO produced an empty selection; an MRIO requires at least one remaining row/column.", call. = FALSE)
+  }
+
   get_julia_connection()
   if (.dims == 1) {
     new_Z <- .data$Z[mask, ]

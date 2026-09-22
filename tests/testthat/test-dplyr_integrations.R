@@ -143,6 +143,32 @@ test_that("group_by and summarize/summarise work for aggregation", {
   expect_equal(dim(summed2), c(3, 3))
 })
 
+test_that("group_by and summarise aggregate exact values", {
+  # Small fixture with a repeated group label and hand-computed aggregates.
+  # matrix(as.numeric(1:9), 3, 3) fills column-major, so its rows are
+  # (1, 4, 7), (2, 5, 8) and (3, 6, 9).
+  grp_col <- data.frame(Sector = c("Agr", "Man", "Ser"), stringsAsFactors = FALSE)
+  grp_row <- data.frame(G = c("A", "A", "B"), stringsAsFactors = FALSE)
+  me_grp <- MatrixEntry(matrix(as.numeric(1:9), 3, 3), grp_col, grp_row)
+
+  summed <- me_grp %>%
+    dplyr::group_by(G) %>%
+    dplyr::summarise(total = sum(value))
+  expect_s3_class(summed, "MatrixEntry")
+  expect_equal(dim(summed), c(2, 3)) # groups A and B
+  # Group A holds rows 1-2: column sums 1+2=3, 4+5=9, 7+8=15.
+  # Group B holds row 3: 3, 6, 9. Column-major order, sorted for stability.
+  expect_equal(sort(as.vector(summed$data)), c(3, 3, 6, 9, 9, 15))
+
+  averaged <- me_grp %>%
+    dplyr::group_by(G) %>%
+    dplyr::summarise(avg = mean(value))
+  expect_s3_class(averaged, "MatrixEntry")
+  expect_equal(dim(averaged), c(2, 3))
+  # Group A column means: 1.5, 4.5, 7.5. Group B: 3, 6, 9.
+  expect_equal(sort(as.vector(averaged$data)), c(1.5, 3, 4.5, 6, 7.5, 9))
+})
+
 test_that("summarise rejects multiple, zero, or unsupported expressions", {
   grouped <- me %>% dplyr::group_by(Region)
 
@@ -223,6 +249,10 @@ test_that("explicit .dims is honored even when names exist in both indices", {
   expect_error(me %>% dplyr::select(Country, .dims = 3), ".dims must be")
   expect_error(me %>% dplyr::mutate(x = 1, .dims = 3), ".dims must be")
   expect_error(me %>% dplyr::filter(GDP > 1, .dims = 0), ".dims must be")
+  # logical .dims is rejected just like any other invalid value
+  expect_error(me %>% dplyr::select(Country, .dims = TRUE), ".dims must be")
+  expect_error(me %>% dplyr::filter(GDP > 1, .dims = TRUE), ".dims must be")
+  expect_error(me %>% dplyr::group_by(Region, .dims = TRUE), ".dims must be")
 })
 
 test_that("ambiguous or undetectable dimensions warn and default to rows", {

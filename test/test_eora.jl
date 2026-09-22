@@ -488,6 +488,16 @@ end
         a = @test_logs (:warn,) IO.calculate_technical_coefficients(z, [10.0, 0.0])
         @test a.data[:, 2] == [2.0, 15.0]
         @test_logs IO.calculate_technical_coefficients(z, [10.0, 20.0])
+        # Opt-out silences the warning without changing the numbers
+        a_quiet = @test_logs IO.calculate_technical_coefficients(z, [10.0, 0.0]; warn_zero_output = false)
+        @test a_quiet.data == a.data
+        # Non-square kwargs construction uses a deliberate all-zero placeholder
+        # output, so it must not warn
+        z_ns = IO.MatrixEntry([10.0 2.0 3.0; 4.0 5.0 6.0], DataFrame(CountryCode = ["USA", "CHN", "DEU"]), sec_idx)
+        y_ns = IO.MatrixEntry(reshape([5.0, 6.0], 2, 1), DataFrame(Category = ["HH"]), sec_idx)
+        va_ns = IO.MatrixEntry([2.0 3.0 1.0], DataFrame(CountryCode = ["USA", "CHN", "DEU"]), va_idx)
+        m_ns = @test_logs MRIO(Z = z_ns, Y = y_ns, VA = va_ns)
+        @test m_ns.A.data == z_ns.data
     end
 
     @testset "Eora path validation" begin

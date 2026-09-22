@@ -247,6 +247,24 @@ test_that("drop_mut accepts a list of named lists and mutates in place", {
   expect_error(drop_mut(make_core_entry(), list("USA")), "must be a named list")
 })
 
+test_that("drop_mut preserves non-syntactic index column names exactly", {
+  skip_if_not(is_julia_available(), "Julia environment not available for testing")
+  col_df <- data.frame(
+    CountryCode = c("USA", "CHN"),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  col_df[["VA share (%)"]] <- c(0.1, 0.2)
+  row_df <- col_df
+  m <- MatrixEntry(diag(2), col_df, row_df)
+  expect_identical(names(m$row_indices), c("CountryCode", "VA share (%)"))
+
+  m <- drop_mut(m, list(CountryCode = "USA"))
+  expect_s3_class(m, "MatrixEntry")
+  expect_identical(names(m$row_indices), c("CountryCode", "VA share (%)"))
+  expect_identical(names(m$col_indices), c("CountryCode", "VA share (%)"))
+})
+
 test_that("printing empty entries does not error", {
   skip_if_not(is_julia_available(), "Julia environment not available for testing")
   me <- make_core_entry()
@@ -273,4 +291,18 @@ test_that("mrio field access validates names and reads fields", {
   # objects built without environmental data carry `env = nothing`.
   env <- mrio$env
   expect_true(is.null(env) || inherits(env, "EnvironmentalExtension"))
+})
+
+test_that("filter on MRIO with an empty selection errors clearly", {
+  skip_if_not(is_julia_available(), "Julia environment not available for testing")
+  mrio <- make_core_mrio()
+
+  expect_error(
+    suppressWarnings(dplyr::filter(mrio, CountryCode == "ZZZ")),
+    "empty selection"
+  )
+  expect_error(
+    suppressWarnings(dplyr::filter(mrio, CountryCode == "ZZZ", .dims = 2)),
+    "empty selection"
+  )
 })

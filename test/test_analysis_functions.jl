@@ -127,6 +127,8 @@ end
     fn_mean = groupby_matrix(matrix_entry, :CountryCode; agg_func = mean, rows = true)
     @test str_mean.value ≈ fn_mean.value
     @test_throws ArgumentError groupby_matrix(matrix_entry, :CountryCode; agg_func = "nonsense")
+    @test_throws ArgumentError groupby_matrix(matrix_entry)
+    @test_throws ArgumentError groupby_matrix(matrix_entry, Symbol[])
     @test !("value" in names(custom_groups))
 end
 
@@ -251,6 +253,10 @@ end
     custom_wide = pivot_matrix_to_wide(matrix_entry, [:Country], :Sector, "trade_value")
     @test "Agr" in names(custom_wide)
     @test "Man" in names(custom_wide)
+
+    # A bare Symbol for row_vars matches the single-element vector form
+    sym_wide = pivot_matrix_to_wide(matrix_entry, :Country, :Sector)
+    @test sym_wide == wide_df
 end
 
 @testset "add_calculated_column Function" begin

@@ -43,7 +43,7 @@ as.data.frame.SeriesEntry <- function(x, row.names = NULL, optional = FALSE, ...
 #' @return The validated `.dims` value.
 #' @noRd
 .validate_dims <- function(.dims) {
-  if (length(.dims) != 1L || is.na(.dims) || !(.dims %in% c(1, 2))) {
+  if (is.logical(.dims) || length(.dims) != 1L || is.na(.dims) || !(.dims %in% c(1, 2))) {
     stop(".dims must be 1 (rows) or 2 (columns)", call. = FALSE)
   }
   .dims

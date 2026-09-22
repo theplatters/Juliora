@@ -42,8 +42,9 @@ out). A `DimensionMismatch` is thrown otherwise.
 
 # Examples
 ```julia
-# Load environmental data (requires actual data files)
-env_ext = EnvironmentalExtension("data/2017/", total_output_vector)
+# Load environmental data from Eora files (requires actual data files;
+# t_indices/row_mask select the non-ROW sectors matching total_output_vector)
+env_ext = EnvironmentalExtension("data/2017/", total_output_vector, t_indices, row_mask)
 
 # Access CO2 intensities
 co2_intensity = filter_rows(env_ext.A, row -> row.Stressor == "CO2")
