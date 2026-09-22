@@ -1,3 +1,18 @@
+"""
+    LeontiefFactorization{F} <: AbstractMatrixEntry
+
+LU factorization of `I - A` with labeled row/column indices. Constructed via
+`calculate_leontief_factorization(a::MatrixEntry)` or the 3-argument
+constructor `(factorization, col_indices, row_indices)`.
+
+!!! warning "The cached inverse is shared state"
+    `getproperty(lf, :data)` materializes the full Leontief inverse on first
+    access and caches it; every subsequent access returns *the same matrix
+    object*. Treat `lf.data` as READ-ONLY — mutating it in place corrupts the
+    result of all later accesses. Likewise treat `row_indices`/`col_indices`
+    as immutable: modifying them in place silently invalidates the cached
+    inverse and the dimension checks performed at construction time.
+"""
 struct LeontiefFactorization{F} <: AbstractMatrixEntry
     factorization::F
     col_indices::DataFrame

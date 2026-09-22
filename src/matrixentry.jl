@@ -564,7 +564,10 @@ end
     _check_invariants(m::MatrixEntry)
 
 Internal helper: verify `size(m.data) == (nrow(m.row_indices), nrow(m.col_indices))`
-after a mutating operation, so aliasing or lookup bugs surface immediately.
+after a mutating operation. This checks the self-consistency of the mutated
+object only; it does not detect in-place mutation of index frames shared with
+other entries. Shared-frame integrity is instead guaranteed by `drop!`
+rebinding fresh frames (replace-not-mutate) rather than editing shared ones.
 """
 function _check_invariants(m::MatrixEntry)
     expected = (nrow(m.row_indices), nrow(m.col_indices))
