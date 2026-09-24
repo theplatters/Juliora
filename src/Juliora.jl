@@ -15,6 +15,7 @@ export filter_matrix, to_long_dataframe, from_long_dataframe, groupby_matrix, su
 export countries, country, sectors, sector, stressors, stressor
 export @filter_rows, @filter_cols, @mutate_rows, @mutate_cols, @select_rows, @select_cols, @rename_rows, @rename_cols, @slice_rows, @slice_cols
 export update_row_indices, update_col_indices
+export CommunityResult, mrio_graph, graph_summary, to_simple_graph, communities, community_table, community_summary, pagerank_scores, node_similarity, similarity_graph, compare_networks, compare_partitions
 
 
 function safe_dataframe(df)
@@ -41,6 +42,7 @@ include("matrixentry.jl")
 include("LeontiefFactorization.jl")
 include("environmental_extension.jl")
 include("mrio.jl")
+include("graph_interface.jl")
 include("parsers/parsers.jl")
 using .Parser: parse_gloria, parse_gloria_sut
 include("aggregation.jl")

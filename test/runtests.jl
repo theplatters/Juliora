@@ -50,6 +50,10 @@ using Tidier
         include("test_aggregation.jl")
     end
 
+    @testset "Graph Extension Tests" begin
+        include("test_graphs.jl")
+    end
+
     @testset "Tidier.jl Integration Tests" begin
         include("test_tidier_integrations.jl")
     end

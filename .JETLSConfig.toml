@@ -1,0 +1,36 @@
+#:schema https://github.com/aviatesk/JETLS.jl/releases/latest/download/config-toml.schema.json
+
+# Default formatter
+formatter = "Runic"
+
+[full_analysis]
+# Wait briefly after saving before running JET's full analysis
+debounce = 1.0
+
+# Ask before modifying/instantiating the project environment
+auto_instantiate = "prompt"
+
+[diagnostic]
+enabled = true
+
+# Also diagnose files that aren't currently open
+all_files = true
+
+# Treat _foo as intentionally unused
+allow_unused_underscore = true
+
+[code_lens]
+# Reference-count lenses tend to add visual noise
+references = false
+
+# Useful if you use JETLS's TestRunner integration
+testrunner = true
+
+[inlay_hint.types]
+# Disable inferred type hints, e.g. `x::Int64`
+enabled = false
+
+[inlay_hint.block_end]
+# Keep helpful labels on `end` for long functions/blocks
+enabled = true
+min_lines = 25

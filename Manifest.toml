@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.6"
+julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "588ed858a58b982ed50d0a49a4f74e0d0a0d528d"
+project_hash = "3bfb31e0d34ac5d6817ade14371c872466b36a27"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -454,7 +454,7 @@ weakdeps = ["Dates", "LinearAlgebra"]
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.3.0+1"
+version = "1.3.1+2"
 
 [[deps.CompositionsBase]]
 git-tree-sha1 = "802bb88cd69dfd1509f6670416bd4434015693ad"
@@ -1213,10 +1213,14 @@ uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
 
 [[deps.Juliora]]
-deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "Random", "Statistics", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
+deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "Random", "SparseArrays", "Statistics", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
 path = "."
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
 version = "0.2.0"
+weakdeps = ["Graphs"]
+
+    [deps.Juliora.extensions]
+    JulioraGraphsExt = "Graphs"
 
 [[deps.KernelDensity]]
 deps = ["Distributions", "DocStringExtensions", "FFTW", "Interpolations", "StatsBase"]
@@ -1609,7 +1613,7 @@ version = "1.5.0"
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
-version = "3.5.4+0"
+version = "3.5.6+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
