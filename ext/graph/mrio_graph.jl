@@ -1,6 +1,6 @@
-# Zero-copy dense graph view over an MRIO matrix (`MRIOGraph`).
+# Zero-copy graph view over an MRIO matrix (`MRIOGraph`).
 #
-# Memory rules: the wrapped dense matrix is the source of truth. Construction
+# Memory rules: the wrapped matrix is the source of truth. Construction
 # allocates no n×n structure — no `W + W'`, no `copy`, no `sparse(W)`, no
 # `Float32` conversion. Symmetrized weights are read on the fly
 # (`W[i, j] + W[j, i]`) and `threshold`/`min_share` filtering happens inside
@@ -8,9 +8,9 @@
 # extraction path.
 
 """
-    MRIOGraph{TV,TI,D} <: Graphs.AbstractGraph{TI}
+    MRIOGraph{TV,TI,D,TM} <: Graphs.AbstractGraph{TI}
 
-Zero-copy graph view over a dense MRIO matrix.
+Zero-copy graph view over an MRIO matrix (dense or sparse).
 
 An edge `i → j` means "monetary flow supplied by node `i` to buyer `j`"
 (`Z[i, j]` of the wrapped transactions matrix).
@@ -21,11 +21,16 @@ An edge `i → j` means "monetary flow supplied by node `i` to buyer `j`"
 - `D::Bool`: directedness value parameter (`true` for `:directed`). Graphs.jl's
   contract is `is_directed(::Type)`, so directedness is encoded in the type and
   SimpleTraits-based generics dispatch on it.
+- `TM<:AbstractMatrix{TV}`: concrete wrapped matrix type (dense `Matrix` or
+  sparse). The weights are held in this concrete type — never an
+  abstractly-typed field — so per-element reads in hot loops stay statically
+  dispatched for both dense and sparse weights.
 
 # Fields
-- `weights::Matrix{TV}`: zero-copy reference to the dense MRIO matrix. It
-  `===` the input matrix whenever the caller passes a `Matrix`; only a
-  non-`Matrix` `AbstractMatrix` input is copied once via `Matrix(W)`.
+- `weights::AbstractMatrix{TV}`: zero-copy reference to the MRIO matrix. It
+  `===` the input matrix whenever the caller passes a `Matrix` or a sparse
+  matrix; only any other non-`Matrix` `AbstractMatrix` input is copied once
+  via `Matrix(W)`.
 - `nodes::DataFrame`: shared reference to the node metadata (the selected
   matrix's supplier-side `row_indices`); never copied.
 - `filter::Tuple{Float64, Float64, Bool, Float64}`: `(threshold, min_share,
@@ -45,25 +50,30 @@ the diagonal counted once, never doubled.
 definition, so self-loops count once there (unlike `SimpleGraph`, which counts
 them twice).
 """
-struct MRIOGraph{TV <: Real, TI <: Integer, D} <: Graphs.AbstractGraph{TI}
-    weights::Matrix{TV}
+struct MRIOGraph{TV <: Real, TI <: Integer, D, TM <: AbstractMatrix{TV}} <: Graphs.AbstractGraph{TI}
+    weights::TM
     nodes::DataFrame
     filter::Tuple{Float64, Float64, Bool, Float64}
 end
 
 """
-    FilteredWeights{TV,TI,D} <: AbstractMatrix{Float64}
+    FilteredWeights{TV,TI,D,TW} <: AbstractMatrix{Float64}
 
 Zero-copy `AbstractMatrix` view returned by `Graphs.weights(g)`: `getindex`
 evaluates the filtered/symmetrized effective weight `w(i, j)` on the fly, so
 generic Graphs.jl functions (e.g. `Graphs.modularity(g, c;
-distmx=Graphs.weights(g))`) see the filtered weights without any copy.
+distmx=Graphs.weights(g))`) see the filtered weights without any copy. `TW`
+is the concrete wrapped matrix type, so element access stays type-stable for
+both dense and sparse weights.
 """
-struct FilteredWeights{TV, TI, D} <: AbstractMatrix{Float64}
-    W::Matrix{TV}
+struct FilteredWeights{TV, TI, D, TW <: AbstractMatrix{TV}} <: AbstractMatrix{Float64}
+    W::TW
     cutoff::Float64
     self_loops::Bool
 end
+
+FilteredWeights{TV, TI, D}(W::AbstractMatrix{TV}, cutoff::Float64, self_loops::Bool) where {TV, TI, D} =
+    FilteredWeights{TV, TI, D, typeof(W)}(W, cutoff, self_loops)
 
 Base.size(F::FilteredWeights) = size(F.W)
 Base.IndexStyle(::Type{<:FilteredWeights}) = IndexCartesian()
@@ -86,17 +96,20 @@ Base.getindex(F::FilteredWeights, i::Integer, j::Integer) = F[Int(i), Int(j)]
 LinearAlgebra.issymmetric(::FilteredWeights{TV, TI, false}) where {TV, TI} = true
 
 """
-    MRIOEdgeIter{TV,TI,D}
+    MRIOEdgeIter{TV,TI,D,TM}
 
 Lazy O(1)-memory edge iterator returned by `Graphs.edges(g)`: directed graphs
 yield every ordered pair `(i, j)` with nonzero effective weight; undirected
 graphs yield `SimpleEdge(min(i, j), max(i, j))` for each unordered pair with
 nonzero effective weight (including self-loops `(i, i)` when `self_loops` is
-true). A full pass is O(n²) time.
+true). A full pass is O(n²) time. `TM` is the concrete wrapped matrix type of
+`g`, so per-element reads stay statically dispatched.
 """
-struct MRIOEdgeIter{TV, TI, D}
-    g::MRIOGraph{TV, TI, D}
+struct MRIOEdgeIter{TV, TI, D, TM <: AbstractMatrix{TV}}
+    g::MRIOGraph{TV, TI, D, TM}
 end
+
+MRIOEdgeIter{TV, TI, D}(g::MRIOGraph{TV, TI, D, TM}) where {TV, TI, D, TM} = MRIOEdgeIter{TV, TI, D, TM}(g)
 
 Base.eltype(::Type{<:MRIOEdgeIter{TV, TI, D}}) where {TV, TI, D} = Graphs.SimpleEdge{TI}
 Base.IteratorEltype(::Type{<:MRIOEdgeIter}) = Base.HasEltype()
@@ -269,10 +282,10 @@ end
 
 Shared construction path: validates squareness (`DimensionMismatch` unless
 `size(W, 1) == size(W, 2) == nrow(nodes)`), stores `W` as-is when it is a
-`Matrix` (so `g.weights === W`), copies once via `Matrix(W)` only for
-non-`Matrix` `AbstractMatrix` input, and computes the `min_share` scale in one
-O(n²) pass. Never converts the element type (a `Float32` matrix stays
-`Float32`) and never densifies/sparsifies anything.
+`Matrix` or a sparse matrix (so `g.weights === W`), copies once via `Matrix(W)`
+only for any other non-`Matrix` `AbstractMatrix` input, and computes the
+`min_share` scale in one O(n²) pass. Never converts the element type (a
+`Float32` matrix stays `Float32`) and never densifies/sparsifies anything.
 """
 function _wrap_mrio_matrix(
         W::AbstractMatrix,
@@ -290,11 +303,11 @@ function _wrap_mrio_matrix(
     nrow(nodes) == nrows || throw(
         DimensionMismatch("node table has $(nrow(nodes)) rows but the weight matrix is $nrows × $ncols"),
     )
-    dense = W isa Matrix ? W : Matrix(W)
-    scale = _graph_scale(dense, ms)
+    stored = W isa Matrix || W isa SparseArrays.AbstractSparseMatrix ? W : Matrix(W)
+    scale = _graph_scale(stored, ms)
     filt = (th, ms, sl, scale)
     directed = direction === :directed
-    return MRIOGraph{eltype(dense), Int32, directed}(dense, nodes, filt)
+    return MRIOGraph{eltype(stored), Int32, directed, typeof(stored)}(stored, nodes, filt)
 end
 
 function _entry_for_source(mrio::Juliora.MRIO, source::Symbol)
@@ -386,9 +399,9 @@ end
 Build a zero-copy graph view over a raw square matrix `W` with `nrow(nodes) ==
 size(W, 1)` (`DimensionMismatch` otherwise). Edge convention, filtering and
 memory semantics are identical to the `MRIO` method: `W[i, j]` is the flow
-supplied by `i` to buyer `j`; when `W isa Matrix` it is stored as-is
-(`g.weights === W`), otherwise it is copied once via `Matrix(W)`; the element
-type is never converted.
+supplied by `i` to buyer `j`; when `W isa Matrix` or a sparse matrix it is
+stored as-is (`g.weights === W`), otherwise it is copied once via `Matrix(W)`;
+the element type is never converted.
 """
 function mrio_graph(
         W::AbstractMatrix,
@@ -424,7 +437,7 @@ undirected off-diagonal: `W[i, j] + W[j, i]`; diagonal: `W[i, i]`),
 `memory_bytes = sizeof(g.weights)` is the memory the graph references
 (shared with the MRIO; construction itself allocates no copy).
 
-Runs a single O(n²) streaming pass over the dense matrix per call.
+Runs a single O(n²) streaming pass over the wrapped matrix per call.
 """
 function graph_summary(g::MRIOGraph{TV, TI, D}) where {TV, TI, D}
     total, retained, nedges = weight_sums(g.weights, g.filter, D)
@@ -515,7 +528,7 @@ end
     to_simple_graph(g::MRIOGraph; threshold=0.0, topk=nothing) -> (simple_graph, distmx)
 
 Opt-in extraction of `g` into a Graphs.jl simple graph plus its weight
-matrix. A single streaming pass over the dense matrix emits the pruned
+matrix. A single streaming pass over the wrapped matrix emits the pruned
 compact edges `(src::Int32, dst::Int32, w::Float32)` (per-node `topk`
 pruning, when requested, filters the emitted candidates afterwards).
 

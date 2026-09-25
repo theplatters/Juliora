@@ -81,8 +81,9 @@ shared node `DataFrame` reference, never copied).
 
 # Memory
 
-Weighted iteration allocates exactly three length-`n` `Float64` vectors
-(`r`, `work`, `inv_s`) and nothing per iteration; the filter is applied
+Weighted iteration allocates four length-`n` `Float64` vectors in total:
+the uniform teleport vector plus the iteration's three (`r`, `work`,
+`inv_s`) — and nothing per iteration; the filter is applied
 on the fly inside the kernels, never as a materialized pruned matrix.
 """
 function pagerank_scores(
@@ -100,10 +101,62 @@ function pagerank_scores(
         return Juliora.SeriesEntry(Vector{Float64}(scores), g.nodes)
     end
     _check_nonnegative_weights(g)
+    teleport = fill(1.0 / n, n)
+    r = _weighted_pagerank(g, damping, teleport, tol, max_iter)
+    return Juliora.SeriesEntry(r, g.nodes)
+end
+
+"""
+    _weighted_pagerank(g::MRIOGraph, damping, teleport::AbstractVector{<:Real}, tol, max_iter; fname="pagerank_scores") -> Vector{Float64}
+
+Weighted power iteration with a general personalization (teleport) vector:
+with `n = nv(g)`, effective weights `w(i, j)` of `g` (directed:
+`filtered_weight`; undirected: `sym_weight`), out-strengths `s_i = Σ_j w(i,
+j)`, `inv_s[i] = 1 / s_i` (or `0.0` when `s_i == 0`), and starting vector
+`r = Vector{Float64}(teleport)`:
+
+```julia
+for iter in 1:max_iter
+    dangling = Σ_{i: inv_s[i] == 0} r[i]
+    work[j] = Σ_i w(i, j) * r[i] * inv_s[i]          # filtered_tvec! / symmetric_tvec!
+    scale = (1 - damping) + damping * dangling
+    err = Σ_j |damping * work[j] + scale * teleport[j] - r[j]|
+    r[j] = damping * work[j] + scale * teleport[j]
+    err < n * tol && return r
+end
+```
+
+Dangling-node (zero out-strength) mass is redistributed to the teleport
+vector (standard Andersen–Chung–Lang personalized PageRank). With the uniform
+`teleport = fill(1 / n, n)` this is exactly the `pagerank_scores` weighted
+iteration (uniform dangling redistribution via `β = scale / n`), so
+`pagerank_scores`' weighted path delegates here unchanged. Callers must have
+validated `damping`/`tol`/`max_iter`/`n` and the effective weights, and
+`teleport` must hold non-negative entries summing to 1 with
+`length(teleport) == n`. Non-convergence throws an `ErrorException` naming
+`fname`. Allocates three length-`n` `Float64` vectors (`r`, `work`,
+`inv_s`) and nothing per iteration (the teleport vector is used by
+reference).
+"""
+function _weighted_pagerank(
+        g::MRIOGraph{TV, TI, D},
+        damping::Real,
+        teleport::AbstractVector{<:Real},
+        tol::Real,
+        max_iter::Integer;
+        fname::AbstractString = "pagerank_scores",
+    ) where {TV, TI, D}
+    n = Graphs.nv(g)
+    length(teleport) == n || throw(
+        DimensionMismatch("teleport vector has length $(length(teleport)) but the graph has $n nodes"),
+    )
     alpha = Float64(damping)
     tolerance = Float64(tol)
     niter = Int(max_iter)
-    r = fill(1.0 / n, n)
+    r = Vector{Float64}(undef, n)
+    @inbounds for j in 1:n
+        r[j] = Float64(teleport[j])
+    end
     work = Vector{Float64}(undef, n)
     inv_s = Vector{Float64}(undef, n)
     if D
@@ -130,19 +183,19 @@ function pagerank_scores(
         else
             symmetric_tvec!(work, W, f, r, inv_s)
         end
-        beta = (1.0 - alpha + alpha * dangling) / n
+        scale = (1.0 - alpha) + alpha * dangling
         err = 0.0
         for j in 1:n
-            newval = alpha * work[j] + beta
+            newval = alpha * work[j] + scale * Float64(teleport[j])
             err += abs(newval - r[j])
             r[j] = newval
         end
         if err < n * tolerance
-            return Juliora.SeriesEntry(r, g.nodes)
+            return r
         end
     end
     return error(
-        "pagerank_scores did not converge after max_iter=$niter iterations " *
+        "$fname did not converge after max_iter=$niter iterations " *
             "(last L1 change $err); increase max_iter or tol",
     )
 end

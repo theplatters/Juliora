@@ -5,6 +5,7 @@ using DataFrames
 using LinearAlgebra
 using SparseArrays
 using Random
+using Statistics
 
 # Naive ground-truth references for the MRIOGraph semantics contract.
 # These use plain loops over the raw matrix only and never touch the
@@ -2194,4 +2195,1311 @@ end
         r32 = communities(g32; algorithm = :spectral, ncommunities = 2, seed = 5)
         @test gref_same_partition(r32.membership, GRAPH_PLANT_MEMB)
     end
+end
+
+@testset "Compact weights" begin
+    # Sparse weight input is stored zero-copy and reads through the whole
+    # existing API surface exactly like its dense equivalent.
+    Wsp = SparseArrays.sparse(Float32[0 2 0; 1 0 3; 0 0 0])
+    gs = mrio_graph(Wsp, gref_nodes(3))
+    @test gs.weights === Wsp
+    @test Graphs.weights(gs)[1, 2] == 2
+    @test Graphs.weights(gs)[2, 1] == 1
+    gu = mrio_graph(Wsp, gref_nodes(3); direction = :undirected)
+    @test Graphs.weights(gu)[1, 2] == 3
+    gd = mrio_graph(Matrix(Wsp), gref_nodes(3); direction = :undirected)
+    @test Graphs.ne(gu) == Graphs.ne(gd)
+    @test graph_summary(gu).total_weight == graph_summary(gd).total_weight
+    @test nrow(graph_summary(gs)) == 1
+    gd_dir = mrio_graph(Matrix(Wsp), gref_nodes(3))
+    @test pagerank_scores(gs).data ≈ pagerank_scores(gd_dir).data
+    rs = communities(gs; algorithm = :label_propagation, seed = 1)
+    rd = communities(gd_dir; algorithm = :label_propagation, seed = 1)
+    @test rs.modularity ≈ rd.modularity
+    simple_s, _ = to_simple_graph(gs)
+    @test Graphs.nv(simple_s) == 3
+
+    # Sparse-wrapped similarity ≡ dense similarity bit-for-bit: the panel
+    # loops read `W[i, j]` elementwise on whatever `weights` holds, so the
+    # sparse and dense forms of `Wsp` must give identical kNN results.
+    Wsp_dense = Matrix(Wsp)
+    gd_sim = mrio_graph(Wsp_dense, gref_nodes(3))
+    for method in (:cosine, :jaccard)
+        rsparse = node_similarity(gs; method = method, k = 2)
+        rdense = node_similarity(gd_sim; method = method, k = 2)
+        @test SparseArrays.nnz(rsparse.weights) == SparseArrays.nnz(rdense.weights)
+        srows, scols, svals = SparseArrays.findnz(rsparse.weights)
+        drows, dcols, dvals = SparseArrays.findnz(rdense.weights)
+        @test srows == drows
+        @test scols == dcols
+        @test svals == dvals
+    end
+    rsparse_rw = node_similarity(gs; method = :random_walk, sources = [1], k = 2)
+    rdense_rw = node_similarity(gd_sim; method = :random_walk, sources = [1], k = 2)
+    @test SparseArrays.nnz(rsparse_rw.weights) == SparseArrays.nnz(rdense_rw.weights)
+    srows_rw, scols_rw, svals_rw = SparseArrays.findnz(rsparse_rw.weights)
+    drows_rw, dcols_rw, dvals_rw = SparseArrays.findnz(rdense_rw.weights)
+    @test srows_rw == drows_rw
+    @test scols_rw == dcols_rw
+    @test svals_rw == dvals_rw
+    gsparse_sym = similarity_graph(gs; symmetrize = :max)
+    gdense_sym = similarity_graph(gd_sim; symmetrize = :max)
+    @test SparseArrays.nnz(gsparse_sym.weights) == SparseArrays.nnz(gdense_sym.weights)
+    srows_s, scols_s, svals_s = SparseArrays.findnz(gsparse_sym.weights)
+    drows_s, dcols_s, dvals_s = SparseArrays.findnz(gdense_sym.weights)
+    @test srows_s == drows_s
+    @test scols_s == dcols_s
+    @test svals_s == dvals_s
+
+    # Same sparse ≡ dense contract on a larger seeded Float32 sparse matrix
+    # with sprinkled exact zeros — non-vacuous: every result below carries
+    # edges, so the bit-for-bit equality is exercised on real values.
+    Wsr = rand(MersenneTwister(20260924), Float32, 10, 10)
+    Wsr[rand(MersenneTwister(20260925), 10, 10) .< 0.3] .= 0.0f0
+    Wsr_sp = SparseArrays.sparse(Wsr)
+    gsr_sp = mrio_graph(Wsr_sp, gref_nodes(10))
+    gsr_de = mrio_graph(Matrix(Wsr_sp), gref_nodes(10))
+    for method in (:cosine, :jaccard)
+        rsparse = node_similarity(gsr_sp; method = method, k = 2)
+        rdense = node_similarity(gsr_de; method = method, k = 2)
+        @test SparseArrays.nnz(rsparse.weights) > 0
+        @test SparseArrays.nnz(rsparse.weights) == SparseArrays.nnz(rdense.weights)
+        srows, scols, svals = SparseArrays.findnz(rsparse.weights)
+        drows, dcols, dvals = SparseArrays.findnz(rdense.weights)
+        @test srows == drows
+        @test scols == dcols
+        @test svals == dvals
+    end
+    rsparse_rw = node_similarity(gsr_sp; method = :random_walk, sources = [1], k = 2)
+    rdense_rw = node_similarity(gsr_de; method = :random_walk, sources = [1], k = 2)
+    @test SparseArrays.nnz(rsparse_rw.weights) > 0
+    @test SparseArrays.nnz(rsparse_rw.weights) == SparseArrays.nnz(rdense_rw.weights)
+    srows_rw, scols_rw, svals_rw = SparseArrays.findnz(rsparse_rw.weights)
+    drows_rw, dcols_rw, dvals_rw = SparseArrays.findnz(rdense_rw.weights)
+    @test srows_rw == drows_rw
+    @test scols_rw == dcols_rw
+    @test svals_rw == dvals_rw
+    gsparse_sym = similarity_graph(gsr_sp; symmetrize = :max)
+    gdense_sym = similarity_graph(gsr_de; symmetrize = :max)
+    @test SparseArrays.nnz(gsparse_sym.weights) > 0
+    @test SparseArrays.nnz(gsparse_sym.weights) == SparseArrays.nnz(gdense_sym.weights)
+    srows_s, scols_s, svals_s = SparseArrays.findnz(gsparse_sym.weights)
+    drows_s, dcols_s, dvals_s = SparseArrays.findnz(gdense_sym.weights)
+    @test srows_s == drows_s
+    @test scols_s == dcols_s
+    @test svals_s == dvals_s
+end
+
+# Naive dense reference for profile similarity (plan test 5a device): the
+# effective matrix via the plain gref_* helpers (filters and self-loops
+# included), the full similarity matrix by plain double loops over explicit
+# profiles, then top-k with the pinned tie rule (self excluded,
+# strictly positive only, descending value with ties to the smaller index,
+# first k). Never touches the implementation's kernels.
+function gref_similarity_A(W::AbstractMatrix, directed::Bool, tau::Float64, self_loops::Bool)
+    n = size(W, 1)
+    wfun = directed ? gref_directed_w : gref_undirected_w
+    return [wfun(W, i, j, tau, self_loops) for i in 1:n, j in 1:n]
+end
+
+function gref_similarity_ref(
+        W::AbstractMatrix,
+        directed::Bool,
+        tau::Float64,
+        self_loops::Bool,
+        method::Symbol,
+        on::Symbol,
+        k::Int,
+    )
+    n = size(W, 1)
+    A = gref_similarity_A(W, directed, tau, self_loops)
+    function profile(i::Int)
+        if on === :out
+            return Vector{Float64}(A[i, :])
+        elseif on === :in
+            return Vector{Float64}(A[:, i])
+        else
+            return vcat(Vector{Float64}(A[i, :]), Vector{Float64}(A[:, i]))
+        end
+    end
+    S = zeros(n, n)
+    for i in 1:n, j in 1:n
+        pi = profile(i)
+        pj = profile(j)
+        if method === :cosine
+            ni = sqrt(sum(abs2, pi))
+            nj = sqrt(sum(abs2, pj))
+            S[i, j] = (ni == 0.0 || nj == 0.0) ? 0.0 : dot(pi, pj) / (ni * nj)
+        else
+            bi = pi .!= 0.0
+            bj = pj .!= 0.0
+            inter = count(bi .& bj)
+            u = count(bi) + count(bj) - inter
+            S[i, j] = u == 0 ? 0.0 : inter / u
+        end
+    end
+    keff = min(k, n - 1)
+    edges = Dict{Tuple{Int, Int}, Float64}()
+    for i in 1:n
+        cands = [(S[i, j], j) for j in 1:n if j != i && S[i, j] > 0.0]
+        sort!(cands; lt = (a, b) -> a[1] > b[1] || (a[1] == b[1] && a[2] < b[2]))
+        for t in 1:min(keff, length(cands))
+            edges[(i, cands[t][2])] = cands[t][1]
+        end
+    end
+    return edges
+end
+
+# Dense linear-solve reference for personalized PageRank (random-walk
+# device): transition rows from the effective matrix (dangling rows map to
+# the teleport vector), then `(I - d·P̃') p = (1 - d)·δ_s` solved directly —
+# an independent algorithm from the power iteration.
+function gref_ppr(
+        W::AbstractMatrix,
+        directed::Bool,
+        tau::Float64,
+        self_loops::Bool,
+        s::Int,
+        damping::Float64,
+    )
+    n = size(W, 1)
+    A = gref_similarity_A(W, directed, tau, self_loops)
+    strengths = vec(sum(A; dims = 2))
+    Pt = zeros(n, n)
+    for i in 1:n
+        if strengths[i] == 0.0
+            Pt[i, s] = 1.0
+        else
+            Pt[i, :] = A[i, :] ./ strengths[i]
+        end
+    end
+    rhs = [(j == s ? 1.0 : 0.0) for j in 1:n]
+    return (I - damping * transpose(Pt)) \ ((1.0 - damping) * rhs)
+end
+
+# Function-barrier allocation probe for one cosine node_similarity call.
+# Kept at top level so `@allocated` measures the call itself rather than
+# testset-scope variable capture.
+function gref_nsim_alloc(g)
+    return @allocated node_similarity(g; method = :cosine, k = 10)
+end
+
+@testset "Similarity" begin
+    ext = Base.get_extension(Juliora, :JulioraGraphsExt)
+    @test ext !== nothing
+
+    # 5a. Blocked top-k matches the naive dense reference: edge SETS and
+    # values across methods x profiles x directedness x filters, on seeded
+    # random non-negative matrices with sprinkled exact zeros (jaccard
+    # support variety) and, for the self-loop config, a nonzero diagonal.
+    sim_filter_cfgs = [(0.0, 0.0, false), (0.5, 0.0, false), (0.0, 0.05, false), (0.25, 0.0, true)]
+    for n in (12, 40)
+        for (method, on) in Iterators.product((:cosine, :jaccard), (:out, :in, :both))
+            for directed in (true, false)
+                direction = directed ? :directed : :undirected
+                for (threshold, min_share, self_loops) in sim_filter_cfgs
+                    rng = MersenneTwister(4000 + n + 100 * Int(method === :jaccard) + 10 * Int(on === :in) + Int(on === :both))
+                    W = rand(rng, n, n)
+                    W[rand(rng, n, n) .< 0.25] .= 0.0
+                    if self_loops
+                        for i in 1:n
+                            W[i, i] = 0.5 + rand(rng)
+                        end
+                    end
+                    tau = gref_tau(W, threshold, min_share)
+                    g = mrio_graph(
+                        copy(W),
+                        gref_nodes(n);
+                        direction = direction,
+                        threshold = threshold,
+                        min_share = min_share,
+                        self_loops = self_loops,
+                    )
+                    k = 3
+                    ref = gref_similarity_ref(W, directed, tau, self_loops, method, on, k)
+                    res = node_similarity(g; method = method, on = on, k = k)
+                    got_rows, got_cols, got_vals = SparseArrays.findnz(res.weights)
+                    got = Dict{Tuple{Int, Int}, Float64}(
+                        (Int(got_rows[t]), Int(got_cols[t])) => Float64(got_vals[t]) for t in eachindex(got_vals)
+                    )
+                    @test Set(keys(ref)) == Set(keys(got))
+                    maxdiff = 0.0
+                    for e in keys(ref)
+                        maxdiff = max(maxdiff, abs(got[e] - ref[e]))
+                    end
+                    @test maxdiff <= 1.0e-6
+                end
+            end
+        end
+    end
+
+    # 5b. kNN symmetrization rules, unit-tested on a hand-built directed kNN
+    # matrix: S[1, 2] = 0.5 / S[2, 1] = 0.3 (both directions) and one-sided
+    # S[1, 3] = 0.7. :max keeps 0.5, :mean gives (0.5 + 0.3) / 2 = 0.4; the
+    # one-sided pair keeps 0.7 under both rules. Storage is one-sided
+    # upper-triangular (lower entries read 0).
+    Sk = SparseArrays.sparse(Int32[1, 2, 1], Int32[2, 1, 3], Float32[0.5, 0.3, 0.7], 3, 3)
+    @test Sk isa SparseArrays.SparseMatrixCSC{Float32, Int32}
+    Mmax = ext._symmetrize_knn(Sk, 3, :max)
+    @test Mmax isa SparseArrays.SparseMatrixCSC{Float32, Int32}
+    @test Mmax[1, 2] ≈ 0.5f0
+    @test Mmax[2, 1] == 0.0f0
+    @test Mmax[1, 3] ≈ 0.7f0
+    @test Mmax[3, 1] == 0.0f0
+    Mmean = ext._symmetrize_knn(Sk, 3, :mean)
+    @test Mmean[1, 2] ≈ 0.4f0
+    @test Mmean[2, 1] == 0.0f0
+    @test Mmean[1, 3] ≈ 0.7f0
+
+    # 5b end to end with hand-computed cosine values. W rows (directed, no
+    # filter): p1 = [0, 3, 4] (norm 5), p2 = [0, 0, 5] (norm 5),
+    # p3 = [0, 0, 0] (norm 0). S[1, 2] = S[2, 1] = (3*0 + 4*5) / 25 = 0.8;
+    # everything touching node 3 is 0. k = 2 keeps 1 <-> 2 only.
+    Wh = [0.0 3.0 4.0; 0.0 0.0 5.0; 0.0 0.0 0.0]
+    gh = mrio_graph(copy(Wh), gref_nodes(3))
+    rh = node_similarity(gh; method = :cosine, on = :out, k = 2)
+    @test rh.weights[1, 2] ≈ 0.8f0
+    @test rh.weights[2, 1] ≈ 0.8f0
+    @test SparseArrays.nnz(rh.weights) == 2
+    for symmetrize in (:max, :mean)
+        gsim = similarity_graph(gh; method = :cosine, on = :out, k = 2, symmetrize = symmetrize)
+        @test Graphs.is_directed(gsim) == false
+        @test gsim.weights isa SparseArrays.SparseMatrixCSC{Float32, Int32}
+        # Pair-weight reads: the FilteredWeights view and the raw one-sided
+        # upper-triangular storage both give s = 0.8.
+        @test Graphs.weights(gsim)[1, 2] ≈ 0.8
+        @test gsim.weights[1, 2] + gsim.weights[2, 1] ≈ 0.8f0
+        @test gsim.weights[1, 2] ≈ 0.8f0
+        @test gsim.weights[2, 1] == 0.0f0
+        @test Graphs.ne(gsim) == 1
+    end
+
+    # Top-k edge cases.
+    # k >= n - 1 clamps: identical rows ([1, 1, 1] with self_loops = true,
+    # so the kept diagonal joins the profiles) give cosine 1.0 for every
+    # off-diagonal pair, so k = 100 keeps all 6 edges.
+    Wcl = [1.0 1.0 1.0; 1.0 1.0 1.0; 1.0 1.0 1.0]
+    gcl = mrio_graph(copy(Wcl), gref_nodes(3); self_loops = true)
+    rcl = node_similarity(gcl; k = 100)
+    @test SparseArrays.nnz(rcl.weights) == 6
+    for i in 1:3, j in 1:3
+        i == j && continue
+        @test rcl.weights[i, j] ≈ 1.0f0
+    end
+    # An all-zero row (isolated profile) gets no out-edges: row 3 of
+    # [0 1 1; 1 0 1; 0 0 0] has norm 0, so row 3 emits nothing (and nothing
+    # points at it either, since every S[i, 3] needs its norm).
+    Wz = [0.0 1.0 1.0; 1.0 0.0 1.0; 0.0 0.0 0.0]
+    gz = mrio_graph(copy(Wz), gref_nodes(3))
+    rz = node_similarity(gz; k = 2)
+    @test all(rz.weights[3, :] .== 0.0f0)
+    @test rz.weights[1, 2] ≈ 0.5f0
+    # Self-similarity never appears as an edge, and the exact tie resolves
+    # to the smaller index. n = 4, self_loops = false: rows 2 and 3 are
+    # both [2, 0, 0, 3] off-diagonally, so p2 == p3 == [2, 0, 0, 3]
+    # (norm √13); p1 = [0, 1, 0, 1] (norm √2). S[1, 2] == S[1, 3] ==
+    # 3 / √(2·13) ≈ 0.588 (bitwise identical dots), S[2, 2] would be 1.0.
+    # k = 1 keeps (1, 2) from row 1 and (2, 3) from row 2 — never (2, 2).
+    Wt = [0.0 1.0 0.0 1.0; 2.0 0.0 0.0 3.0; 2.0 0.0 0.0 3.0; 0.0 0.0 0.0 0.0]
+    gt = mrio_graph(copy(Wt), gref_nodes(4))
+    rt = node_similarity(gt; k = 1)
+    @test rt.weights[2, 2] == 0.0f0
+    @test rt.weights[1, 2] ≈ Float32(3 / sqrt(26))
+    @test rt.weights[1, 3] == 0.0f0
+    @test rt.weights[2, 3] ≈ 1.0f0
+
+    # Heap boundary tie with k >= 2 (k = 3): rows 2-5 are raw-identical
+    # ([1, 5, 0, 3, 0], self_loops = true so the diagonal joins the
+    # profiles), hence p2 == p3 == p4 == p5 bitwise and all four cosine
+    # scores to row 1 (p1 = [0, 1, 0, 1, 0], dot 8 > 0) are exactly equal.
+    # The tie rule "smaller j first" must keep {2, 3, 4}: candidate 5 ties
+    # the heap minimum but its larger index never dislodges a smaller one.
+    Wtie = [0.0 1.0 0.0 1.0 0.0; 1.0 5.0 0.0 3.0 0.0; 1.0 5.0 0.0 3.0 0.0; 1.0 5.0 0.0 3.0 0.0; 1.0 5.0 0.0 3.0 0.0]
+    gtie = mrio_graph(copy(Wtie), gref_nodes(5); self_loops = true)
+    rtie = node_similarity(gtie; method = :cosine, k = 3)
+    kept1 = sort([j for j in 1:5 if rtie.weights[1, j] != 0.0f0])
+    @test kept1 == [2, 3, 4]
+    @test rtie.weights[1, 5] == 0.0f0
+    @test rtie.weights[1, 2] == rtie.weights[1, 3] == rtie.weights[1, 4]
+
+    # Result contracts.
+    Wc = rand(MersenneTwister(77), 6, 6)
+    gc = mrio_graph(copy(Wc), gref_nodes(6))
+    rc = node_similarity(gc; k = 3)
+    @test rc.nodes === gc.nodes
+    @test rc.weights isa SparseArrays.SparseMatrixCSC{Float32, Int32}
+    @test SparseArrays.nnz(rc.weights) <= 3 * 6
+    @test Graphs.is_directed(rc) == true
+    @test Graphs.nv(rc) == 6
+    sc = similarity_graph(gc; k = 3)
+    @test sc.nodes === gc.nodes
+    @test sc.weights isa SparseArrays.SparseMatrixCSC{Float32, Int32}
+    @test Graphs.is_directed(sc) == false
+    # n == 1 gives an empty result (k clamps to 0).
+    g1 = mrio_graph(reshape([2.0], 1, 1), gref_nodes(1))
+    r1 = node_similarity(g1)
+    @test Graphs.ne(r1) == 0
+    @test size(r1.weights) == (1, 1)
+    @test Graphs.ne(similarity_graph(g1)) == 0
+    # Full determinism: no RNG in the implementation, two runs identical.
+    rc2 = node_similarity(gc; method = :jaccard, on = :both, k = 3)
+    rc3 = node_similarity(gc; method = :jaccard, on = :both, k = 3)
+    @test rc2.weights == rc3.weights
+    @test similarity_graph(gc; k = 3).weights == similarity_graph(gc; k = 3).weights
+    # MRIO method builds mrio_graph and forwards (default :directed).
+    mrio = gref_plant_mrio()
+    rm = node_similarity(mrio; k = 2)
+    rg = node_similarity(mrio_graph(mrio); k = 2)
+    @test rm.weights == rg.weights
+    @test rm.nodes === mrio.T.row_indices
+    @test node_similarity(mrio; threshold = 5.0, k = 2).weights ==
+        node_similarity(mrio_graph(mrio; threshold = 5.0); k = 2).weights
+    sm = similarity_graph(mrio; k = 2)
+    @test sm.weights == similarity_graph(mrio_graph(mrio); k = 2).weights
+    @test Graphs.is_directed(sm) == false
+
+    # Interop: similarity_graph feeds communities (plan: the reusable
+    # builder). Two 4-node blocks with strong within-block flows plus weak
+    # noise; k = 3 keeps the block neighbors.
+    rng_b = MersenneTwister(2026)
+    Wb = 0.05 .* rand(rng_b, 8, 8)
+    Wb[1:4, 1:4] .+= 4.0
+    Wb[5:8, 5:8] .+= 4.0
+    for i in 1:8
+        Wb[i, i] = 0.0
+    end
+    gb = mrio_graph(copy(Wb), gref_nodes(8))
+    simb = similarity_graph(gb; k = 3)
+    resb = communities(simb; algorithm = :louvain, seed = 2)
+    @test resb isa CommunityResult
+    @test length(resb.membership) == 8
+    @test resb.modularity ≈ ext._partition_modularity(simb, resb.membership, resb.resolution)
+
+    # Validation.
+    @test_throws ArgumentError node_similarity(gc; method = :bogus)
+    @test_throws ArgumentError node_similarity(gc; on = :bogus)
+    @test_throws ArgumentError node_similarity(gc; method = :random_walk, on = :bogus)
+    @test_throws ArgumentError similarity_graph(gc; symmetrize = :bogus)
+    @test_throws ArgumentError node_similarity(gc; k = true)
+    @test_throws ArgumentError node_similarity(gc; k = big(2)^80)
+    @test_throws ArgumentError node_similarity(gc; k = 0)
+    @test_throws ArgumentError node_similarity(gc; k = -2)
+    @test_throws ArgumentError node_similarity(gc; damping = 0.0)
+    @test_throws ArgumentError node_similarity(gc; damping = 1.0)
+    @test_throws ArgumentError node_similarity(gc; tol = 0.0)
+    @test_throws ArgumentError node_similarity(gc; max_iter = 0)
+    @test_throws ArgumentError node_similarity(gc; method = :cosine, sources = [1])
+    @test_throws ArgumentError node_similarity(
+        mrio_graph(zeros(0, 0), DataFrame(CountryCode = String[], Sector = String[])),
+    )
+    # NaN/negative effective weights are rejected; the message names the
+    # entry point and the offending pair. NaN sits at the retained
+    # off-diagonal (1, 2): a diagonal NaN with the default
+    # self_loops = false is dropped by the self-loop rule everywhere
+    # (mirroring the PageRank/Community tests).
+    @test_throws ArgumentError node_similarity(mrio_graph([0.0 NaN; 0.0 0.0], gref_nodes(2)))
+    @test_throws ArgumentError node_similarity(mrio_graph([-1.0 -1.0; 0.0 0.0], gref_nodes(2)))
+    gnan_err = try
+        node_similarity(mrio_graph([0.0 NaN; 0.0 0.0], gref_nodes(2)))
+        nothing
+    catch e
+        e
+    end
+    @test gnan_err isa ArgumentError
+    @test occursin("node_similarity", sprint(showerror, gnan_err))
+    @test occursin("w(1, 2)", sprint(showerror, gnan_err))
+    @test_throws ArgumentError similarity_graph(mrio_graph([0.0 NaN; 0.0 0.0], gref_nodes(2)))
+    gsim_nan_err = try
+        similarity_graph(mrio_graph([0.0 NaN; 0.0 0.0], gref_nodes(2)))
+        nothing
+    catch e
+        e
+    end
+    @test gsim_nan_err isa ArgumentError
+    @test occursin("similarity_graph", sprint(showerror, gsim_nan_err))
+    @test occursin("w(1, 2)", sprint(showerror, gsim_nan_err))
+    @test_throws ErrorException node_similarity(42)
+
+    # Memory guard (R6): a cosine run on a seeded n = 2000 random
+    # non-negative matrix with sprinkled exact zeros must stay far below
+    # any n x n scratch (32 MiB at n = 2000 for Float64); expected ~3 MB
+    # (block scratch + O(k*n) sparse result).
+    Wbig = rand(MersenneTwister(123), 2000, 2000)
+    Wbig[rand(MersenneTwister(124), 2000, 2000) .< 0.1] .= 0.0
+    gbig = mrio_graph(Wbig, gref_nodes(2000))
+    node_similarity(gbig; method = :cosine, k = 10) # warm-up (compilation)
+    @test gref_nsim_alloc(gbig) < 12 * 2^20
+    rbig = node_similarity(gbig; method = :cosine, k = 10)
+    @test SparseArrays.nnz(rbig.weights) <= 10 * 2000
+end
+
+@testset "Random walk" begin
+    ext = Base.get_extension(Juliora, :JulioraGraphsExt)
+    @test ext !== nothing
+
+    # (a) Hand-computed PPR on the 2-node graph W = [0 1; 2 0] (directed,
+    # damping = 0.5). Row strengths s = [1, 2]; row-normalized transitions
+    # P = [0 1; 1 0]. Fixed point p = (1 - d)·δ_s + d·P'·p with d = 0.5:
+    # source 1: p1 = 0.5 + 0.5·p2, p2 = 0.5·p1 → p = [2/3, 1/3];
+    # source 2: p1 = 0.5·p2, p2 = 0.5 + 0.5·p1 → p = [1/3, 2/3].
+    W2 = [0.0 1.0; 2.0 0.0]
+    g2 = mrio_graph(copy(W2), gref_nodes(2))
+    p1 = ext._weighted_pagerank(g2, 0.5, [1.0, 0.0], 1.0e-14, 100_000)
+    @test p1 ≈ [2 / 3, 1 / 3] atol = 1.0e-10
+    p2 = ext._weighted_pagerank(g2, 0.5, [0.0, 1.0], 1.0e-14, 100_000)
+    @test p2 ≈ [1 / 3, 2 / 3] atol = 1.0e-10
+    r1 = node_similarity(g2; method = :random_walk, sources = [1], damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 1)
+    # Top-k of p_1 excluding the source itself (p_1[1] = 2/3 is the max but
+    # never becomes an edge): the single edge 1 -> 2 carries 1/3.
+    @test SparseArrays.nnz(r1.weights) == 1
+    @test r1.weights[1, 2] ≈ Float32(1 / 3) rtol = 1.0e-5
+    @test r1.weights[1, 1] == 0.0f0
+    r2 = node_similarity(g2; method = :random_walk, sources = [2], damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 1)
+    @test r2.weights[2, 1] ≈ Float32(1 / 3) rtol = 1.0e-5
+    @test SparseArrays.nnz(r2.weights) == 1
+
+    # (b) Dangling-node case: W = [0 2 0; 0 0 3; 0 0 0], source 1,
+    # damping = 0.5. Strengths [2, 3, 0]; node 3 is dangling with mass
+    # m_d = p3 feeding δ_1. Fixed-point system:
+    # p1 = 0.5·(1 + m_d), p2 = 0.5·p1, p3 = 0.5·p2, m_d = p3, so
+    # p1 = 0.5·(1 + p1/4) → p = [4/7, 2/7, 1/7] (sums to 1).
+    Wd = [0.0 2.0 0.0; 0.0 0.0 3.0; 0.0 0.0 0.0]
+    gd = mrio_graph(copy(Wd), gref_nodes(3))
+    pd = ext._weighted_pagerank(gd, 0.5, [1.0, 0.0, 0.0], 1.0e-14, 100_000)
+    @test pd ≈ [4 / 7, 2 / 7, 1 / 7] atol = 1.0e-10
+    rd = node_similarity(gd; method = :random_walk, sources = [1], damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 1)
+    @test rd.weights[1, 2] ≈ Float32(2 / 7) rtol = 1.0e-5
+    @test SparseArrays.nnz(rd.weights) == 1
+    rd2 = node_similarity(gd; method = :random_walk, sources = [1], damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 2)
+    @test rd2.weights[1, 2] ≈ Float32(2 / 7) rtol = 1.0e-5
+    @test rd2.weights[1, 3] ≈ Float32(1 / 7) rtol = 1.0e-5
+
+    # Cross-check against the dense linear-solve reference on seeded random
+    # non-negative matrices (both directednesses, self-loops on/off): the
+    # internal iterate and the top-k edges of the public result.
+    for directed in (true, false)
+        direction = directed ? :directed : :undirected
+        for self_loops in (false, true)
+            rng = MersenneTwister(900 + 10 * Int(directed) + Int(self_loops))
+            n = 9
+            W = rand(rng, n, n)
+            W[rand(rng, n, n) .< 0.3] .= 0.0
+            if self_loops
+                for i in 1:n
+                    W[i, i] = 0.5 + rand(rng)
+                end
+            end
+            g = mrio_graph(copy(W), gref_nodes(n); direction = direction, self_loops = self_loops)
+            for s in (1, 5, 9)
+                pref = gref_ppr(W, directed, 0.0, self_loops, s, 0.5)
+                pgot = ext._weighted_pagerank(g, 0.5, [j == s ? 1.0 : 0.0 for j in 1:n], 1.0e-14, 100_000)
+                @test pgot ≈ pref atol = 1.0e-9
+                @test sum(pgot) ≈ 1.0 atol = 1.0e-9
+                r = node_similarity(g; method = :random_walk, sources = [s], damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 3)
+                cands = [(pref[j], j) for j in 1:n if j != s && pref[j] > 0.0]
+                sort!(cands; lt = (a, b) -> a[1] > b[1] || (a[1] == b[1] && a[2] < b[2]))
+                keept = first(cands, min(3, length(cands)))
+                frw = SparseArrays.findnz(r.weights)
+                got_pairs = Set((Int(i), Int(j)) for (i, j) in zip(frw[1], frw[2]))
+                @test Set([(s, c[2]) for c in keept]) == got_pairs
+                for c in keept
+                    @test r.weights[s, c[2]] ≈ Float32(c[1]) rtol = 1.0e-5
+                end
+            end
+        end
+    end
+
+    # (c) sources validation: required with :random_walk, rejected with
+    # :cosine/:jaccard, out-of-range rejected, duplicates deduped.
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk)
+    @test_throws ArgumentError node_similarity(g2; method = :cosine, sources = [1])
+    @test_throws ArgumentError node_similarity(g2; method = :jaccard, sources = [1])
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = [0])
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = [3])
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = Int[])
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = 1)
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = [true])
+    @test_throws ArgumentError node_similarity(g2; method = :random_walk, sources = [big(2)^80])
+    @test_throws ArgumentError similarity_graph(g2; method = :random_walk)
+    # Duplicates dedupe to first occurrences: sources = [2, 1, 2] emits
+    # edges from rows {1, 2} exactly like sources = [2, 1].
+    W3 = [0.0 1.0 1.0; 1.0 0.0 1.0; 1.0 1.0 0.0]
+    g3 = mrio_graph(copy(W3), gref_nodes(3))
+    kw = (; method = :random_walk, damping = 0.5, tol = 1.0e-14, max_iter = 100_000, k = 2)
+    rdup = node_similarity(g3; kw..., sources = [2, 1, 2])
+    rded = node_similarity(g3; kw..., sources = [2, 1])
+    @test rdup.weights == rded.weights
+    @test Set(Int(i) for (i, _, _) in zip(SparseArrays.findnz(rdup.weights)...)) == Set([1, 2])
+    @test all(rdup.weights[3, :] .== 0.0f0)
+
+    # (d) Top-k excludes the source node itself even when k is ample: with
+    # k = 5 on the 3-node clique-like W3 every non-source row member is
+    # kept, but no self edge appears.
+    rk = node_similarity(g3; kw..., sources = [1], k = 5)
+    @test rk.weights[1, 1] == 0.0f0
+    @test SparseArrays.nnz(rk.weights) == 2
+end
+
+# ---- Cross-network / cross-partition comparison references ----
+# Independent naive references for `compare_networks`/`compare_partitions`.
+# Plain loops over explicit index/item pairs built with `Dict` key matching
+# (overlap/strengths/density/scale) and O(m^2) brute-force pair counting
+# (ARI) plus a naive double loop over label pairs (NMI) — structurally
+# unlike the production contingency-table/index-map code.
+
+function gref_compare_key_maps(nodes1::DataFrame, nodes2::DataFrame, cols::Vector{Symbol})
+    index2 = Dict{Any, Int}()
+    for r in 1:nrow(nodes2)
+        index2[ntuple(i -> nodes2[r, cols[i]], length(cols))] = r
+    end
+    map1 = Int[]
+    map2 = Int[]
+    for r in 1:nrow(nodes1)
+        k = ntuple(i -> nodes1[r, cols[i]], length(cols))
+        if haskey(index2, k)
+            push!(map1, r)
+            push!(map2, index2[k])
+        end
+    end
+    return map1, map2
+end
+
+function gref_compare_ref(
+        W1::AbstractMatrix,
+        directed1::Bool,
+        tau1::Float64,
+        sl1::Bool,
+        W2::AbstractMatrix,
+        directed2::Bool,
+        tau2::Float64,
+        sl2::Bool,
+        map1::Vector{Int},
+        map2::Vector{Int},
+    )
+    m = length(map1)
+    sum_min = 0.0
+    sum_max = 0.0
+    sout1 = zeros(m)
+    sout2 = zeros(m)
+    sin1 = zeros(m)
+    sin2 = zeros(m)
+    cnt1 = 0
+    cnt2 = 0
+    sc1 = 0.0
+    sc2 = 0.0
+    for j in 1:m, i in 1:m
+        v1 = directed1 ? gref_directed_w(W1, map1[i], map1[j], tau1, sl1) :
+            gref_undirected_w(W1, map1[i], map1[j], tau1, sl1)
+        v2 = directed2 ? gref_directed_w(W2, map2[i], map2[j], tau2, sl2) :
+            gref_undirected_w(W2, map2[i], map2[j], tau2, sl2)
+        sum_min += min(v1, v2)
+        sum_max += max(v1, v2)
+        sout1[i] += v1
+        sout2[i] += v2
+        sin1[j] += v1
+        sin2[j] += v2
+        v1 != 0.0 && (cnt1 += 1)
+        v2 != 0.0 && (cnt2 += 1)
+        sc1 += v1
+        sc2 += v2
+    end
+    return (;
+        sum_min = sum_min,
+        sum_max = sum_max,
+        sout1 = sout1,
+        sout2 = sout2,
+        sin1 = sin1,
+        sin2 = sin2,
+        cnt1 = cnt1,
+        cnt2 = cnt2,
+        sc1 = sc1,
+        sc2 = sc2,
+    )
+end
+
+function gref_count_ranks(x::AbstractVector{<:Real})
+    # O(m^2) average ranks by counting (structurally unlike the sort-based
+    # `_tied_ranks`): rank[i] = #{x[j] < x[i]} + (#{x[j] == x[i]} + 1) / 2.
+    n = length(x)
+    r = Vector{Float64}(undef, n)
+    for i in 1:n
+        less = count(j -> x[j] < x[i], 1:n)
+        equal = count(j -> x[j] == x[i], 1:n)
+        r[i] = less + (equal + 1) / 2
+    end
+    return r
+end
+
+function gref_ari_nmi_ref(a::AbstractVector{<:Integer}, b::AbstractVector{<:Integer})
+    # ARI from pair counting (loop over all item pairs: `same_both`,
+    # `same_1`, `same_2` give `ARI = (same_both − E) / (M − E)` with
+    # `E = same_1 * same_2 / C(m, 2)`, `M = (same_1 + same_2) / 2`) and NMI
+    # from a naive double loop over label pairs — O(m^2) brute force,
+    # structurally unlike the production contingency code.
+    m = length(a)
+    @assert length(b) == m
+    if m < 2
+        return 1.0, 1.0
+    end
+    same_both = 0
+    same_1 = 0
+    same_2 = 0
+    for i in 1:m, j in (i + 1):m
+        s1 = a[i] == a[j]
+        s2 = b[i] == b[j]
+        s1 && (same_1 += 1)
+        s2 && (same_2 += 1)
+        (s1 && s2) && (same_both += 1)
+    end
+    P = m * (m - 1) / 2
+    E = same_1 * same_2 / P
+    M = (same_1 + same_2) / 2
+    ari = M == E ? 1.0 : (same_both - E) / (M - E)
+    I = 0.0
+    H1 = 0.0
+    H2 = 0.0
+    for u in unique(a), v in unique(b)
+        n = count(t -> a[t] == u && b[t] == v, 1:m)
+        ru = count(==(u), a)
+        cv = count(==(v), b)
+        n > 0 && (I += (n / m) * log(n * m / (ru * cv)))
+    end
+    for u in unique(a)
+        ru = count(==(u), a)
+        H1 -= (ru / m) * log(ru / m)
+    end
+    for v in unique(b)
+        cv = count(==(v), b)
+        H2 -= (cv / m) * log(cv / m)
+    end
+    nmi = (H1 + H2) == 0.0 ? 1.0 : 2I / (H1 + H2)
+    return Float64(ari), Float64(nmi)
+end
+
+# Function-barrier allocation probes for `compare_networks` (with and
+# without the PageRank option). Kept at top level so `@allocated` measures
+# the call itself rather than testset-scope variable capture.
+function gref_compare_alloc(g1, g2)
+    return @allocated compare_networks(g1, g2)
+end
+
+function gref_compare_pr_alloc(g1, g2)
+    return @allocated compare_networks(g1, g2; pagerank = true)
+end
+
+@testset "Network comparison" begin
+    ext = Base.get_extension(Juliora, :JulioraGraphsExt)
+    @test ext !== nothing
+
+    # Column contract: exact names and order without `pagerank`, two
+    # appended PageRank columns with `pagerank = true`.
+    base_cols = [
+        "n_matched",
+        "n_1",
+        "n_2",
+        "edge_overlap",
+        "pearson_out",
+        "spearman_out",
+        "pearson_in",
+        "spearman_in",
+        "density_1",
+        "density_2",
+        "density_ratio",
+        "scale_1",
+        "scale_2",
+        "scale_ratio",
+    ]
+
+    # 1. Identical inputs: two separate `mrio_graph` objects from equal
+    # matrices. W = [0 2 1; 0 0 3; 1 0 0] (directed, no filter) has
+    # sout = [3, 3, 1] and sin = [1, 2, 4] — nonzero strength variance, so
+    # all four correlations are exactly 1.0 (Statistics.cor of a vector
+    # with itself).
+    WI = Float64[0 2 1; 0 0 3; 1 0 0]
+    for directed in (true, false)
+        direction = directed ? :directed : :undirected
+        ni = gref_nodes(3)
+        gi1 = mrio_graph(copy(WI), ni; direction = direction)
+        gi2 = mrio_graph(copy(WI), ni; direction = direction)
+        df = compare_networks(gi1, gi2)
+        @test names(df) == base_cols
+        @test only(df.n_matched) == 3
+        @test only(df.n_1) == 3
+        @test only(df.n_2) == 3
+        @test only(df.edge_overlap) == 1.0
+        @test only(df.pearson_out) == 1.0
+        @test only(df.spearman_out) == 1.0
+        @test only(df.pearson_in) == 1.0
+        @test only(df.spearman_in) == 1.0
+        @test only(df.density_ratio) == 1.0
+        @test only(df.scale_ratio) == 1.0
+        @test only(df.density_1) == only(df.density_2)
+        @test only(df.scale_1) == only(df.scale_2)
+        @test eltype(df.n_matched) == Int
+        @test eltype(df.edge_overlap) == Float64
+        # Identical graphs through the PageRank path: bitwise-identical
+        # score vectors, so the PageRank correlations are exactly 1.0 too.
+        dfpr = compare_networks(gi1, gi2; pagerank = true)
+        @test names(dfpr) == [base_cols; "pearson_pagerank"; "spearman_pagerank"]
+        @test only(dfpr.pearson_pagerank) == 1.0
+        @test only(dfpr.spearman_pagerank) == 1.0
+        @test only(dfpr.edge_overlap) == 1.0
+    end
+
+    # 4. Hand-computed intersection case. Nodes share C1/C2/C3 (CX/CY are
+    # unmatched), directed graphs with defaults (no filter, self_loops =
+    # false, so diagonals are dropped).
+    #   W1 = [0 2 0 9; 0 0 1 8; 4 0 0 7; 6 5 3 0]
+    #   W2 = [0 2 3 1; 0 0 1 2; 4 0 0 0; 0 0 9 0]
+    # Matched 3x3 blocks (rows/cols 1:3, diagonals dropped):
+    #   V1 = [0 2 0; 0 0 1; 4 0 0], V2 = [0 2 3; 0 0 1; 4 0 0].
+    # Nonzero ordered pairs: V1 has (1,2)=2, (2,3)=1, (3,1)=4;
+    # V2 adds (1,3)=3.
+    #   edge_overlap = (2 + 0 + 1 + 4) / (2 + 3 + 1 + 4) = 7/10.
+    #   scale_1 = 7, scale_2 = 10, scale_ratio = 0.7.
+    #   density_1 = 3/9, density_2 = 4/9, density_ratio = 3/4 = 0.75.
+    #   sout_1 = [2,1,4], sout_2 = [5,1,4]:
+    #     pearson_out = 11/sqrt(364) ≈ 0.57656 (Σxy form: with Σx = 7,
+    #     Σy = 10, Σxy = 27, Σx^2 = 21, Σy^2 = 42:
+    #     (3*27 − 70)/sqrt((63 − 49)(126 − 100)) = 11/sqrt(14*26)).
+    #     spearman_out = 1/2 (ranks [2,1,3] vs [3,1,2]: Σxy = 13,
+    #     (3*13 − 36)/6 = 1/2).
+    #   sin_1 = [4,2,1] (V1 columns), sin_2 = [4,2,4] (V2 col 3 is
+    #   3 + 1 + 0 = 4):
+    #     pearson_in = 1/(2*sqrt(7)) ≈ 0.18898 (Σx = 7, Σy = 10, Σxy = 24,
+    #     Σx^2 = 21, Σy^2 = 36: (72 − 70)/sqrt(14*8) = 2/sqrt(112)).
+    #     spearman_in = 0.0 (ranks [3,2,1] vs [2.5,1,2.5]: Σxy = 12,
+    #     numerator 3*12 − 36 = 0).
+    # The unmatched row/column 4 values (9, 8, 7, 6, 5, 3, ...) appear
+    # nowhere: scale_1 == 7 pins intersection semantics (any inclusion of
+    # row/column 4 would add ≥ 3 to a scale).
+    nodes1 = DataFrame(CountryCode = ["C1", "C2", "C3", "CX"], Sector = fill("s", 4))
+    nodes2 = DataFrame(CountryCode = ["C1", "C2", "C3", "CY"], Sector = fill("s", 4))
+    W1 = Float64[0 2 0 9; 0 0 1 8; 4 0 0 7; 6 5 3 0]
+    W2 = Float64[0 2 3 1; 0 0 1 2; 4 0 0 0; 0 0 9 0]
+    g1 = mrio_graph(copy(W1), nodes1)
+    g2 = mrio_graph(copy(W2), nodes2)
+    df = compare_networks(g1, g2)
+    @test names(df) == base_cols
+    @test only(df.n_matched) == 3
+    @test only(df.n_1) == 4
+    @test only(df.n_2) == 4
+    @test only(df.edge_overlap) ≈ 7 / 10
+    @test only(df.scale_1) ≈ 7.0
+    @test only(df.scale_2) ≈ 10.0
+    @test only(df.scale_ratio) ≈ 0.7
+    @test only(df.density_1) ≈ 3 / 9
+    @test only(df.density_2) ≈ 4 / 9
+    @test only(df.density_ratio) ≈ 0.75
+    @test only(df.pearson_out) ≈ 11 / sqrt(364)
+    @test only(df.spearman_out) ≈ 0.5
+    @test only(df.pearson_in) ≈ 1 / (2 * sqrt(7))
+    @test only(df.spearman_in) ≈ 0.0 atol = 1.0e-15
+    # Cross-check every column against the naive reference (explicit index
+    # pairs, counting-based ranks).
+    map1, map2 = gref_compare_key_maps(nodes1, nodes2, [:CountryCode, :Sector])
+    @test map1 == [1, 2, 3]
+    @test map2 == [1, 2, 3]
+    ref = gref_compare_ref(W1, true, 0.0, false, W2, true, 0.0, false, map1, map2)
+    @test only(df.edge_overlap) ≈ ref.sum_min / ref.sum_max
+    @test only(df.pearson_out) ≈ Statistics.cor(ref.sout1, ref.sout2)
+    @test only(df.spearman_out) ≈ Statistics.cor(gref_count_ranks(ref.sout1), gref_count_ranks(ref.sout2))
+    @test only(df.pearson_in) ≈ Statistics.cor(ref.sin1, ref.sin2)
+    @test only(df.spearman_in) ≈ Statistics.cor(gref_count_ranks(ref.sin1), gref_count_ranks(ref.sin2))
+    @test only(df.density_1) ≈ ref.cnt1 / 9
+    @test only(df.density_2) ≈ ref.cnt2 / 9
+    @test only(df.density_ratio) ≈ (ref.cnt1 / 9) / (ref.cnt2 / 9)
+    @test only(df.scale_1) ≈ ref.sc1
+    @test only(df.scale_2) ≈ ref.sc2
+    @test only(df.scale_ratio) ≈ ref.sc1 / ref.sc2
+
+    # 5a. Reordering: g2 with row-shuffled nodes and identically permuted
+    # W rows/cols gives the same metrics (keys, not positions).
+    perm = [3, 1, 4, 2]
+    nodes2s = nodes2[perm, :]
+    W2s = W2[perm, perm]
+    g2s = mrio_graph(copy(W2s), nodes2s)
+    dfs = compare_networks(g1, g2s)
+    @test only(dfs.n_matched) == 3
+    for col in base_cols[4:end]
+        @test only(dfs[!, col]) ≈ only(df[!, col])
+    end
+
+    # 5b. Multi-column composite keys: two nodes sharing CountryCode are
+    # distinguished only by Sector.
+    n1b = DataFrame(CountryCode = ["A", "A", "B"], Sector = ["x", "y", "x"])
+    n2b = DataFrame(CountryCode = ["B", "A", "A"], Sector = ["x", "x", "y"])
+    Wb = Float64[0 1 2; 3 0 4; 5 6 0]
+    # n2b row order is [B/x, A/x, A/y] = n1b rows [3, 1, 2]; permute W
+    # identically so the pair describes the same network.
+    Wb2 = Wb[[3, 1, 2], [3, 1, 2]]
+    gb1 = mrio_graph(copy(Wb), n1b)
+    gb2 = mrio_graph(copy(Wb2), n2b)
+    dfb = compare_networks(gb1, gb2)
+    @test only(dfb.n_matched) == 3
+    @test only(dfb.edge_overlap) == 1.0
+    @test only(dfb.pearson_out) == 1.0
+    @test only(dfb.pearson_in) == 1.0
+    # A single-column key would collide on "A" and throw.
+    @test_throws ArgumentError compare_networks(gb1, gb2; match = [:CountryCode])
+
+    # 5c. Explicit-column form on a fixture where `:keys` picks more
+    # columns: Tags differ across graphs, so `:keys` (CountryCode, Sector,
+    # Tag) matches nothing while `match = [:CountryCode]` aligns on codes.
+    n1c = DataFrame(CountryCode = ["A", "B"], Sector = ["x", "x"], Tag = ["p", "q"])
+    n2c = DataFrame(CountryCode = ["B", "A"], Sector = ["x", "x"], Tag = ["Q", "P"])
+    Wc = Float64[0 1; 2 0]
+    gc1 = mrio_graph(copy(Wc), n1c)
+    gc2 = mrio_graph(copy(Wc[[2, 1], [2, 1]]), n2c)
+    dfc0 = compare_networks(gc1, gc2)
+    @test only(dfc0.n_matched) == 0
+    dfc = compare_networks(gc1, gc2; match = [:CountryCode])
+    @test only(dfc.n_matched) == 2
+    @test only(dfc.edge_overlap) == 1.0
+
+    # 5h. Missing-safe (`isequal`) key matching: `missing` keys pair with
+    # `missing` keys. nodes1 order is [C1, missing, C3]; nodes2 carries the
+    # same three keys as [C3, C1, missing] with W rows/cols permuted
+    # identically (perm [3, 1, 2]).
+    #   Wmiss1   = [0 2 0; 0 0 1; 4 0 0] (nodes1 order),
+    #   W2base   = [0 5 0; 0 0 1; 4 0 0] (nodes1 order; the (C1, missing)
+    #   pair is 5 instead of 2, so the differing pair touches the
+    #   missing-key node).
+    # Matched blocks (diagonals dropped): V1 has (1,2)=2, (2,3)=1,
+    # (3,1)=4; V2 has (1,2)=5, (2,3)=1, (3,1)=4, so
+    #   edge_overlap = (2 + 1 + 4) / (5 + 1 + 4) = 7/10,
+    #   scale_1 = 7, scale_2 = 10.
+    # A `==`-based (non-missing-safe) matcher would drop the missing pair
+    # and report n_matched == 2.
+    nmiss1 = DataFrame(CountryCode = Union{String, Missing}["C1", missing, "C3"], Sector = fill("s", 3))
+    nmiss2 = nmiss1[[3, 1, 2], :]
+    Wmiss1 = Float64[0 2 0; 0 0 1; 4 0 0]
+    Wmiss2 = (Float64[0 5 0; 0 0 1; 4 0 0])[[3, 1, 2], [3, 1, 2]]
+    gmiss1 = mrio_graph(copy(Wmiss1), nmiss1)
+    gmiss2 = mrio_graph(copy(Wmiss2), nmiss2)
+    dfmiss = compare_networks(gmiss1, gmiss2)
+    @test only(dfmiss.n_matched) == 3
+    @test only(dfmiss.n_1) == 3
+    @test only(dfmiss.n_2) == 3
+    @test only(dfmiss.edge_overlap) ≈ 7 / 10
+    @test only(dfmiss.scale_1) ≈ 7.0
+    @test only(dfmiss.scale_2) ≈ 10.0
+    @test only(dfmiss.scale_ratio) ≈ 0.7
+    mmap1, mmap2 = gref_compare_key_maps(nmiss1, nmiss2, [:CountryCode, :Sector])
+    @test mmap1 == [1, 2, 3]
+    @test mmap2 == [2, 3, 1]
+
+    # 5d. Duplicate keys throw (both inputs).
+    ndup = DataFrame(CountryCode = ["A", "A"], Sector = ["x", "x"])
+    gdup = mrio_graph(Float64[0 1; 1 0], ndup)
+    gok = mrio_graph(Float64[0 1; 1 0], DataFrame(CountryCode = ["A", "B"], Sector = ["x", "x"]))
+    err_dup1 = try
+        compare_networks(gdup, gok)
+        nothing
+    catch e
+        e
+    end
+    @test err_dup1 isa ArgumentError
+    @test occursin("duplicate", sprint(showerror, err_dup1))
+    @test occursin("A", sprint(showerror, err_dup1))
+    @test_throws ArgumentError compare_networks(gok, gdup)
+
+    # 5e/5f. Disjoint schemas (`:keys` finds zero shared columns) and
+    # unknown match values throw.
+    nd1 = DataFrame(CodeA = ["a", "b"])
+    nd2 = DataFrame(CodeB = ["a", "b"])
+    gd1 = mrio_graph(Float64[0 1; 1 0], nd1)
+    gd2 = mrio_graph(Float64[0 1; 1 0], nd2)
+    @test_throws ArgumentError compare_networks(gd1, gd2)
+    @test_throws ArgumentError compare_networks(g1, g2; match = :bogus)
+    @test_throws ArgumentError compare_networks(g1, g2; match = "keys")
+    @test_throws ArgumentError compare_networks(g1, g2; match = Symbol[])
+    @test_throws ArgumentError compare_networks(g1, g2; match = [:Nope])
+    @test_throws ArgumentError compare_networks(g1, g2; match = 42)
+
+    # 5g. Zero matched nodes: one row with n_matched == 0, NaN edge
+    # overlap/correlations/densities/ratios, and zero (empty-sum) scales.
+    nz1 = DataFrame(CountryCode = ["A"], Sector = ["s"])
+    nz2 = DataFrame(CountryCode = ["B"], Sector = ["s"])
+    gz1 = mrio_graph(zeros(1, 1), nz1)
+    gz2 = mrio_graph(zeros(1, 1), nz2)
+    dfz = compare_networks(gz1, gz2)
+    @test only(dfz.n_matched) == 0
+    @test only(dfz.n_1) == 1
+    @test only(dfz.n_2) == 1
+    @test isnan(only(dfz.edge_overlap))
+    @test isnan(only(dfz.pearson_out))
+    @test isnan(only(dfz.spearman_out))
+    @test isnan(only(dfz.pearson_in))
+    @test isnan(only(dfz.spearman_in))
+    @test isnan(only(dfz.density_1))
+    @test isnan(only(dfz.density_2))
+    @test isnan(only(dfz.density_ratio))
+    @test only(dfz.scale_1) == 0.0
+    @test only(dfz.scale_2) == 0.0
+    @test isnan(only(dfz.scale_ratio))
+
+    # 6. Spearman ties: the helper pins average ranks, and tied strength
+    # vectors agree end to end with the counting-based reference.
+    # `_tied_ranks([1,2,2,4]) == [1,2.5,2.5,4]`.
+    @test ext._tied_ranks([1.0, 2.0, 2.0, 4.0]) == [1.0, 2.5, 2.5, 4.0]
+    @test ext._tied_ranks([3.0, 1.0, 3.0, 1.0, 2.0]) ≈ gref_count_ranks([3.0, 1.0, 3.0, 1.0, 2.0])
+    # Crafted graphs with tied out-strengths: sout_1 = [2,2,5,1],
+    # sout_2 = [1,3,3,3] (diagonals dropped, directed, no filter).
+    Wt1 = Float64[0 2 0 0; 2 0 0 0; 0 0 0 5; 0 0 1 0]
+    Wt2 = Float64[0 1 0 0; 0 0 3 0; 0 0 0 3; 3 0 0 0]
+    nt = gref_nodes(4)
+    gt1 = mrio_graph(copy(Wt1), nt)
+    gt2 = mrio_graph(copy(Wt2), nt)
+    dft = compare_networks(gt1, gt2)
+    @test gref_count_ranks([2.0, 2.0, 5.0, 1.0]) == [2.5, 2.5, 4.0, 1.0]
+    @test only(dft.spearman_out) ≈ Statistics.cor([2.5, 2.5, 4.0, 1.0], [1.0, 3.0, 3.0, 3.0])
+    @test only(dft.spearman_out) ≈
+        Statistics.cor(gref_count_ranks([2.0, 2.0, 5.0, 1.0]), gref_count_ranks([1.0, 3.0, 3.0, 3.0]))
+
+    # 7. `pagerank = true`: appends exactly the two PageRank columns
+    # (absent otherwise), matching an independent construction — the 3x3
+    # matched blocks built by explicit loops, solved via `mrio_graph` +
+    # `pagerank_scores`, correlated with `Statistics.cor`.
+    # Fixture (matched C1/C2/C3, damping 0.7):
+    #   WA = [0 1 1 5; 0 0 2 0; 3 0 0 0; 0 0 0 0]
+    #   WB = [0 2 0 1; 0 0 1 0; 1 1 0 4; 0 0 0 0]
+    # give non-constant PageRank vectors on both matched subgraphs.
+    @test !("pearson_pagerank" in names(df))
+    @test !("spearman_pagerank" in names(df))
+    WAp = Float64[0 1 1 5; 0 0 2 0; 3 0 0 0; 0 0 0 0]
+    WBp = Float64[0 2 0 1; 0 0 1 0; 1 1 0 4; 0 0 0 0]
+    ga = mrio_graph(copy(WAp), nodes1)
+    gb = mrio_graph(copy(WBp), nodes2)
+    dfp = compare_networks(ga, gb; pagerank = true, damping = 0.7)
+    @test names(dfp) == [base_cols; "pearson_pagerank"; "spearman_pagerank"]
+    @test isfinite(only(dfp.pearson_pagerank))
+    @test isfinite(only(dfp.spearman_pagerank))
+    map_a, map_b = gref_compare_key_maps(nodes1, nodes2, [:CountryCode, :Sector])
+    VAm = [gref_directed_w(WAp, map_a[i], map_a[j], 0.0, false) for i in 1:3, j in 1:3]
+    VBm = [gref_directed_w(WBp, map_b[i], map_b[j], 0.0, false) for i in 1:3, j in 1:3]
+    sub = DataFrame(CountryCode = ["C1", "C2", "C3"], Sector = fill("s", 3))
+    pa = pagerank_scores(mrio_graph(VAm, sub; direction = :directed); damping = 0.7).data
+    pb = pagerank_scores(mrio_graph(VBm, sub; direction = :directed); damping = 0.7).data
+    @test only(dfp.pearson_pagerank) ≈ Statistics.cor(pa, pb)
+    @test only(dfp.spearman_pagerank) ≈ Statistics.cor(gref_count_ranks(pa), gref_count_ranks(pb))
+    # The lazy matched view reads back exactly the source pair weights
+    # (the invariant the PageRank option relies on).
+    gma = ext._matched_graph(ga, map_a)
+    @test size(gma.weights) == (3, 3)
+    for i in 1:3, j in 1:3
+        @test Graphs.weights(gma)[i, j] == Graphs.weights(ga)[map_a[i], map_a[j]]
+    end
+    # m == 0 skips the solves (NaN PageRank columns, no throw).
+    dfpz = compare_networks(gz1, gz2; pagerank = true)
+    @test only(dfpz.n_matched) == 0
+    @test isnan(only(dfpz.pearson_pagerank))
+    @test isnan(only(dfpz.spearman_pagerank))
+    # m == 1: correlations NaN (length-1), and the matched solve itself is
+    # the [1.0] single-node fixed point.
+    n1m = DataFrame(CountryCode = ["A", "B"], Sector = fill("s", 2))
+    n2m = DataFrame(CountryCode = ["A", "C"], Sector = fill("s", 2))
+    g1m = mrio_graph(Float64[0 2; 3 0], n1m)
+    g2m = mrio_graph(Float64[0 4; 1 0], n2m)
+    dfm = compare_networks(g1m, g2m; pagerank = true)
+    @test only(dfm.n_matched) == 1
+    @test isnan(only(dfm.edge_overlap))
+    @test isnan(only(dfm.pearson_out))
+    @test isnan(only(dfm.pearson_pagerank))
+    @test isnan(only(dfm.spearman_pagerank))
+    gm1 = ext._matched_graph(g1m, [1])
+    @test ext._weighted_pagerank(gm1, 0.85, [1.0], 1.0e-6, 100) ≈ [1.0]
+
+    # 9 (networks). Validation: NaN at a retained off-diagonal throws an
+    # ArgumentError naming the entry point and the pair (mirroring the
+    # PageRank/Community validation tests); non-Bool `pagerank` and bad
+    # `damping` throw (damping is always validated, even without pagerank).
+    gnan1 = mrio_graph(Float64[0 NaN; 0 0], gref_nodes(2))
+    gnan2 = mrio_graph(Float64[0 1; 0 0], gref_nodes(2))
+    @test_throws ArgumentError compare_networks(gnan1, gnan2)
+    @test_throws ArgumentError compare_networks(gnan2, gnan1)
+    gnan_err = try
+        compare_networks(gnan1, gnan2)
+        nothing
+    catch e
+        e
+    end
+    @test gnan_err isa ArgumentError
+    @test occursin("compare_networks", sprint(showerror, gnan_err))
+    @test occursin("w(1, 2)", sprint(showerror, gnan_err))
+    @test_throws ArgumentError compare_networks(g1, g2; pagerank = 1)
+    @test_throws ArgumentError compare_networks(g1, g2; damping = 0.0)
+    @test_throws ArgumentError compare_networks(g1, g2; damping = 1.0)
+    @test_throws ArgumentError compare_networks(g1, g2; damping = -0.1)
+    @test_throws ArgumentError compare_networks(g1, g2; pagerank = true, damping = 1.5)
+
+    # 10. Memory guard (the plan's O(1)-extra rule): two seeded n = 2000
+    # graphs must stay far below an m×m submatrix copy (≥ 32 MiB for
+    # Float64) — with and without `pagerank = true` (which adds only O(m)
+    # iteration vectors).
+    Wbig1 = rand(MersenneTwister(1001), 2000, 2000)
+    Wbig2 = rand(MersenneTwister(1002), 2000, 2000)
+    gbig1 = mrio_graph(Wbig1, gref_nodes(2000))
+    gbig2 = mrio_graph(Wbig2, gref_nodes(2000))
+    compare_networks(gbig1, gbig2) # warm-up (compilation)
+    @test gref_compare_alloc(gbig1, gbig2) < 12 * 2^20
+    compare_networks(gbig1, gbig2; pagerank = true) # warm-up (compilation)
+    @test gref_compare_pr_alloc(gbig1, gbig2) < 12 * 2^20
+end
+
+@testset "Partition comparison" begin
+    part_cols = [
+        "n_matched",
+        "n_1",
+        "n_2",
+        "ari",
+        "nmi",
+        "n_communities_1",
+        "n_communities_2",
+        "modularity_1",
+        "modularity_2",
+    ]
+
+    # 1. Identical inputs give ARI = NMI = 1, in both raw-vector and
+    # CommunityResult forms (exact 1.0: identical partitions make the
+    # numerator and denominator bitwise equal, and the 0/0 rules cover the
+    # trivial cases).
+    dfi = compare_partitions([1, 1, 2, 2, 3, 3], [1, 1, 2, 2, 3, 3])
+    @test names(dfi) == part_cols
+    @test only(dfi.n_matched) == 6
+    @test only(dfi.ari) == 1.0
+    @test only(dfi.nmi) == 1.0
+    @test only(dfi.n_communities_1) == 3
+    @test only(dfi.n_communities_2) == 3
+    @test isnan(only(dfi.modularity_1))
+    @test isnan(only(dfi.modularity_2))
+
+    # 2. Hand-computed ARI/NMI case (6 nodes):
+    #   A = [1,1,1,2,2,2], B = [1,1,2,2,3,3].
+    # Contingency (rows A, cols B): n_11 = 2 (items 1, 2), n_12 = 1
+    # (item 3), n_22 = 1 (item 4), n_23 = 2 (items 5, 6).
+    #   ΣC(n,2) = C(2,2) + C(2,2) = 2; ΣC(a,2) = 3 + 3 = 6;
+    #   ΣC(b,2) = 1 + 1 + 1 = 3; C(6,2) = 15.
+    # ARI = (2 − 6*3/15) / ((6 + 3)/2 − 6*3/15) = (2 − 1.2)/(4.5 − 1.2)
+    #     = 0.8/3.3 = 8/33 ≈ 0.242424.
+    # NMI: I = (1/3)log(12/6) + (1/3)log(12/6) = 2/3*log 2 (the two
+    # size-2 cells; the size-1 cells contribute log(6/6) = 0),
+    # H_1 = log 2, H_2 = log 3, so NMI = 2I/(H_1+H_2) = 4log2/(3log6)
+    #     ≈ 0.5158037.
+    A6 = [1, 1, 1, 2, 2, 2]
+    B6 = [1, 1, 2, 2, 3, 3]
+    df6 = compare_partitions(A6, B6)
+    @test only(df6.ari) ≈ 8 / 33
+    @test only(df6.nmi) ≈ 4 * log(2) / (3 * log(6))
+    ari_ref, nmi_ref = gref_ari_nmi_ref(A6, B6)
+    @test only(df6.ari) ≈ ari_ref
+    @test only(df6.nmi) ≈ nmi_ref
+    @test ari_ref ≈ 8 / 33
+    @test nmi_ref ≈ 4 * log(2) / (3 * log(6))
+
+    # 3. ARI/NMI edge cases (exact pinned values).
+    # Both one-cluster: 0/0 rules give 1.0/1.0.
+    df_one = compare_partitions([1, 1, 1, 1], [7, 7, 7, 7])
+    @test only(df_one.ari) == 1.0
+    @test only(df_one.nmi) == 1.0
+    # Both all-singletons: 0/0 rules give 1.0/1.0.
+    df_single = compare_partitions([1, 2, 3], [4, 5, 6])
+    @test only(df_single.ari) == 1.0
+    @test only(df_single.nmi) == 1.0
+    # All-singletons vs one-cluster: ARI = 0/denom = 0, NMI = 0/H = 0.
+    df_mix = compare_partitions([1, 2, 3], [1, 1, 1])
+    @test only(df_mix.ari) == 0.0
+    @test only(df_mix.nmi) == 0.0
+    # Constant vs non-constant: ΣC(cells) = expected exactly, so ARI = 0;
+    # I = 0, so NMI = 0.
+    df_const = compare_partitions([1, 1, 1, 1], [1, 1, 2, 2])
+    @test only(df_const.ari) == 0.0
+    @test only(df_const.nmi) == 0.0
+    # Independent 2-block partitions [1,1,2,2] vs [1,2,1,2]: the 2x2
+    # contingency is all ones, so ΣC(cells) = 0, ΣC(a) = ΣC(b) = 2,
+    # C(4,2) = 6, and ARI = (0 − 4/6)/(2 − 4/6) = −1/2 (below chance is
+    # negative — independence gives 0 only in expectation). NMI = 0
+    # (I = 0 over uniform cells).
+    df_ind = compare_partitions([1, 1, 2, 2], [1, 2, 1, 2])
+    @test only(df_ind.ari) ≈ -0.5
+    @test only(df_ind.nmi) == 0.0
+    ari_ind_ref, nmi_ind_ref = gref_ari_nmi_ref([1, 1, 2, 2], [1, 2, 1, 2])
+    @test only(df_ind.ari) ≈ ari_ind_ref
+    @test only(df_ind.nmi) ≈ nmi_ind_ref
+    # Label-permutation invariance: relabeling both sides (including to
+    # negative and huge labels) changes nothing.
+    a7 = [1, 1, 2, 2, 3, 3, 3]
+    b7 = [1, 2, 1, 2, 3, 1, 3]
+    df7 = compare_partitions(a7, b7)
+    df7r = compare_partitions([10, 10, -5, -5, 10^12, 10^12, 10^12], [7, 8, 7, 8, 9, 7, 9])
+    @test only(df7r.ari) ≈ only(df7.ari)
+    @test only(df7r.nmi) ≈ only(df7.nmi)
+    ari7_ref, nmi7_ref = gref_ari_nmi_ref(a7, b7)
+    @test only(df7.ari) ≈ ari7_ref
+    @test only(df7.nmi) ≈ nmi7_ref
+    # Negative and large labels are accepted, with correct counts.
+    df_neg = compare_partitions(Int64[-10^12, -10^12, 10^12], Int32[-3, -3, -3])
+    @test only(df_neg.n_communities_1) == 2
+    @test only(df_neg.n_communities_2) == 1
+    @test only(df_neg.ari) == 0.0
+    @test only(df_neg.nmi) == 0.0
+
+    # 8. CommunityResult inputs: two results with differently ordered node
+    # tables (rows and membership permuted consistently) describe the same
+    # partition, so key alignment (not positions) gives ARI = NMI = 1.0,
+    # with the stored modularities passed through.
+    Wp = copy(GRAPH_PLANT_Z)
+    np1 = DataFrame(
+        CountryCode = ["A", "A", "A", "B", "B", "B"],
+        Sector = ["s1", "s2", "s3", "s1", "s2", "s3"],
+    )
+    c1 = CommunityResult(
+        Int32[1, 1, 1, 2, 2, 2],
+        0.42,
+        :louvain,
+        1.0,
+        7,
+        np1,
+        Wp,
+        (0.0, 0.0, false, 0.0),
+        true,
+    )
+    perm = [1, 4, 2, 5, 3, 6]
+    np2 = np1[perm, :]
+    # np2 rows are A/s1, B/s1, A/s2, B/s2, A/s3, B/s3, so the consistently
+    # permuted membership is [1,2,1,2,1,2] — the same partition as c1's
+    # [1,1,1,2,2,2] seen through reordered rows.
+    c2 = CommunityResult(
+        Int32[1, 2, 1, 2, 1, 2],
+        0.43,
+        :leiden,
+        1.0,
+        nothing,
+        np2,
+        Wp,
+        (0.0, 0.0, false, 0.0),
+        true,
+    )
+    dfc = compare_partitions(c1, c2)
+    @test names(dfc) == part_cols
+    @test only(dfc.n_matched) == 6
+    @test only(dfc.n_1) == 6
+    @test only(dfc.n_2) == 6
+    @test only(dfc.ari) == 1.0
+    @test only(dfc.nmi) == 1.0
+    @test only(dfc.n_communities_1) == 2
+    @test only(dfc.n_communities_2) == 2
+    @test only(dfc.modularity_1) == 0.42
+    @test only(dfc.modularity_2) == 0.43
+    # Positional-vs-key proof: the same two membership vectors compared
+    # positionally (ignoring node order) are different partitions.
+    dfc_pos = compare_partitions(c1.membership, c2.membership)
+    @test only(dfc_pos.ari) < 1.0
+    # Mixed forms are positional with a length check; modularity is NaN on
+    # the vector side.
+    dfm1 = compare_partitions(c1, Vector{Int}(c1.membership))
+    @test only(dfm1.ari) == 1.0
+    @test only(dfm1.nmi) == 1.0
+    @test only(dfm1.modularity_1) == 0.42
+    @test isnan(only(dfm1.modularity_2))
+    @test only(dfm1.n_1) == 6
+    @test only(dfm1.n_2) == 6
+    dfm2 = compare_partitions(Vector{Int}(c2.membership), c2)
+    @test only(dfm2.ari) == 1.0
+    @test isnan(only(dfm2.modularity_1))
+    @test only(dfm2.modularity_2) == 0.43
+    @test_throws ArgumentError compare_partitions(c1, [1, 1, 1])
+    @test_throws ArgumentError compare_partitions([1, 1, 1], c1)
+    # Community counts on the matched subset: c3 has nodes A..D with
+    # labels [1,2,3,3] (3 communities); c4 has nodes A,B with labels
+    # [7,7] (1 community). Matched A,B give labels [1,2] vs [7,7]:
+    # n_communities_1 == 2 (not 3), n_communities_2 == 1, and the m = 2
+    # minimal case gives ARI = NMI = 0.0.
+    n3 = DataFrame(Code = ["A", "B", "C", "D"])
+    n4 = DataFrame(Code = ["A", "B"])
+    W34 = zeros(4, 4)
+    c3 = CommunityResult(Int32[1, 2, 3, 3], 0.1, :louvain, 1.0, nothing, n3, W34, (0.0, 0.0, false, 0.0), true)
+    c4 = CommunityResult(
+        Int32[7, 7],
+        0.2,
+        :louvain,
+        1.0,
+        nothing,
+        n4,
+        zeros(2, 2),
+        (0.0, 0.0, false, 0.0),
+        true,
+    )
+    df34 = compare_partitions(c3, c4)
+    @test only(df34.n_matched) == 2
+    @test only(df34.n_1) == 4
+    @test only(df34.n_2) == 2
+    @test only(df34.n_communities_1) == 2
+    @test only(df34.n_communities_2) == 1
+    @test only(df34.ari) == 0.0
+    @test only(df34.nmi) == 0.0
+    # 8b. Missing-safe key alignment: both node tables carry a `missing`
+    # key, paired via `isequal`. c5 order is [A, missing, C] with labels
+    # [1, 1, 2]; c6 order is [C, A, missing] with the consistently
+    # permuted labels [2, 1, 1] — the same partition, so ARI = NMI = 1.0
+    # aligned through the `missing` pair (a non-missing-safe matcher would
+    # align only 2 items).
+    nm5 = DataFrame(Code = Union{String, Missing}["A", missing, "C"])
+    nm6 = nm5[[3, 1, 2], :]
+    Wm56 = zeros(3, 3)
+    c5 = CommunityResult(Int32[1, 1, 2], 0.11, :louvain, 1.0, nothing, nm5, Wm56, (0.0, 0.0, false, 0.0), true)
+    c6 = CommunityResult(Int32[2, 1, 1], 0.12, :louvain, 1.0, nothing, nm6, Wm56, (0.0, 0.0, false, 0.0), true)
+    dfm56 = compare_partitions(c5, c6)
+    @test only(dfm56.n_matched) == 3
+    @test only(dfm56.n_1) == 3
+    @test only(dfm56.n_2) == 3
+    @test only(dfm56.ari) == 1.0
+    @test only(dfm56.nmi) == 1.0
+    @test only(dfm56.n_communities_1) == 2
+    @test only(dfm56.n_communities_2) == 2
+    # Matching-rule errors mirror the network side.
+    @test_throws ArgumentError compare_partitions(c3, c3; match = :bogus)
+    ndup3 = DataFrame(Code = ["A", "A"])
+    cdup = CommunityResult(
+        Int32[1, 1],
+        0.0,
+        :louvain,
+        1.0,
+        nothing,
+        ndup3,
+        zeros(2, 2),
+        (0.0, 0.0, false, 0.0),
+        true,
+    )
+    @test_throws ArgumentError compare_partitions(cdup, cdup)
+    nx = DataFrame(Other = ["A", "B", "C", "D"])
+    cx = CommunityResult(
+        Int32[1, 1, 2, 2],
+        0.0,
+        :louvain,
+        1.0,
+        nothing,
+        nx,
+        W34,
+        (0.0, 0.0, false, 0.0),
+        true,
+    )
+    @test_throws ArgumentError compare_partitions(c3, cx)
+
+    # 9 (partitions). Validation: Bool/non-Integer vectors and unequal
+    # lengths throw ArgumentError.
+    @test_throws ArgumentError compare_partitions([true, false], [true, false])
+    @test_throws ArgumentError compare_partitions([1.0, 2.0], [1, 2])
+    @test_throws ArgumentError compare_partitions([1, 2], ["a", "b"])
+    @test_throws ArgumentError compare_partitions([1, 1, 2], [1, 2])
+    @test_throws ArgumentError compare_partitions(c1, [true, true, true, true, true, true])
+    @test_throws ArgumentError compare_partitions(c1, [1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+    gbool_err = try
+        compare_partitions([true, false], [true, false])
+        nothing
+    catch e
+        e
+    end
+    @test gbool_err isa ArgumentError
+    @test occursin("Bool", sprint(showerror, gbool_err))
 end
