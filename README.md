@@ -26,6 +26,8 @@ value added, or environmental stressor metadata.
 - Filter, subset, drop, group, and aggregate matrices by country, sector, or
   other index metadata.
 - Convert matrices to and from long-form data frames for tidy analysis.
+- Analyze flow tables as graphs — PageRank, community detection, node
+  similarity, and cross-network comparison on a zero-copy view of the data.
 - Produce country, sector, bilateral flow, and matrix summary tables.
 - Use Julia `Tidier` macros and R `dplyr` methods for metadata-oriented
   workflows.
@@ -132,6 +134,177 @@ Convert between matrix and tabular forms:
 long = to_long_dataframe(gloria.Z; value_name = "flow")
 wide = pivot_matrix_to_wide(gloria.Z, [:CountryCode], :Sector, "flow")
 rebuilt = from_long_dataframe(long; value_col = "flow")
+```
+
+## Graph Analysis
+
+The graph extension turns the dense flow tables into a `Graphs.jl` graph
+without copying them. It loads with `using Graphs` (Graphs is a weak
+dependency, so it must be installed in the active environment) and works on
+any square flow matrix plus a node-metadata `DataFrame`.
+
+### Quick start
+
+Build a graph directly from a flow matrix and node metadata. An edge `i → j`
+is the monetary flow supplied by node `i` to buyer `j` (`W[i, j]`):
+
+```julia
+using Juliora
+using Graphs
+using DataFrames
+
+nodes = DataFrame(
+    CountryCode = ["A", "A", "B", "B"],
+    Sector = ["s1", "s2", "s1", "s2"],
+)
+W = [0.0 5.0 4.0 0.0;
+     5.0 0.0 0.0 4.0;
+     4.0 0.0 0.0 5.0;
+     0.0 4.0 5.0 0.0]
+
+g = mrio_graph(W, nodes)
+```
+
+`graph_summary` returns a one-row `DataFrame` (post-filter edge count,
+retained weight share, referenced memory):
+
+```julia
+graph_summary(g)
+```
+
+`pagerank_scores` returns a `SeriesEntry` of flow-weighted PageRank scores
+over the node metadata:
+
+```julia
+scores = pagerank_scores(g; damping = 0.85)
+```
+
+`communities` returns a `CommunityResult`; `community_table` joins the
+node-to-community mapping with the node metadata, and `community_summary`
+reports one row per community:
+
+```julia
+result = communities(g; algorithm = :louvain, seed = 1)
+community_table(result)
+community_summary(result)
+```
+
+`node_similarity` returns a directed top-k similarity graph over a compact
+`SparseMatrixCSC{Float32, Int32}`; `similarity_graph` symmetrizes it into an
+undirected kNN graph ready for `communities`:
+
+```julia
+sim = node_similarity(g; method = :cosine, k = 2)
+knn = similarity_graph(g; method = :cosine, k = 2)
+communities(knn; algorithm = :louvain, seed = 1)
+```
+
+`compare_networks` and `compare_partitions` each return a one-row `DataFrame`:
+
+```julia
+g2 = mrio_graph(2 .* W, nodes)
+compare_networks(g, g2; match = :keys)
+compare_partitions(result, communities(g; algorithm = :leiden, seed = 1))
+```
+
+### Semantics worth knowing
+
+- `mrio_graph(W, nodes; direction = :directed, threshold = 0.0, min_share = 0.0,
+  self_loops = false)` drops self-flows `Z[i, i]` by default; the filter
+  `τ = max(threshold, min_share · Σ|W|)` applies as `|w| < τ → 0` on the fly,
+  never as a pruned copy.
+- Per-feature direction defaults: `mrio_graph`, `pagerank_scores`, and the
+  `node_similarity` / `similarity_graph` MRIO methods default to `:directed`
+  for the source graph; `communities(mrio)` defaults to `:undirected`
+  (symmetrized flow weights).
+- `communities` algorithms are `:louvain`, `:leiden`, `:label_propagation`,
+  and `:spectral`; `ncommunities` is only accepted with `:spectral`.
+  `:spectral` needs an O(n²) workspace and is gated to graphs with n ≤ 5 000 —
+  aggregate first (see recipes).
+- `node_similarity` methods are `:cosine`, `:jaccard`, and `:random_walk`;
+  `:random_walk` needs `sources` (one personalized-PageRank solve per source).
+  `similarity_graph` (`symmetrize = :max` or `:mean`) returns an undirected kNN
+  graph usable directly as `communities` input.
+- `compare_networks` / `compare_partitions` align nodes via the shared key
+  columns (`match = :keys`, or explicit columns). `compare_networks` reports
+  every metric on the matched node set; `compare_partitions` scores ARI, NMI,
+  and the community counts on the matched items (its `modularity` columns are
+  each partition's own stored value).
+- The full contract lives in the docstrings (`?mrio_graph`, `?communities`, `?node_similarity`, …).
+
+### Memory strategy
+
+The dense matrix is the source of truth: the graph layer wraps the resident
+`Matrix{Float64}` and never allocates a second full-size copy of the n×n
+data. A sparse copy of the full matrix would be counter-effective: MRIO
+tables are near-complete graphs (`nnz ≈ n²`), so CSC (`Float64` values plus
+`Int64` indices) is about 2× larger than dense (16 B/entry vs 8 B/entry),
+plus a conversion pass and a transient double allocation; sparse and
+edge-list representations only pay off after the problem is reduced (pruned
+or aggregated).
+
+| # | Rule | Meaning |
+|---|---|---|
+| R1 Zero-copy wrapping | `mrio_graph` wraps the existing matrix — no copy, no `Float32` conversion. |
+| R2 No symmetrized copy | Undirected kernels read `W[i, j] + W[j, i]` on the fly; `W + Wᵀ` is never materialized. |
+| R3 On-the-fly weight filtering | `threshold` / `min_share` are applied inside the kernels, never as a pruned matrix. |
+| R4 Sparse/edge extraction opt-in only | Only for Graphs.jl ecosystem interop and weight-blind algorithms (label propagation); a single streaming pass emits already-pruned compact `(src::Int32, dst::Int32, w::Float32)` edges. |
+| R5 Multilevel shrinks itself | Level 0 works on dense tiles with O(n) bookkeeping; level ≥ 1 aggregates are dense `n₁×n₁` with `n₁ ≈ #communities ≪ n`. |
+| R6 Block n×n-shaped results | Similarity never allocates an n×n result: row-block × n scratch plus top-k per row. |
+
+Extra memory budget with n ≈ 25 000 (Gloria) and `W` already resident:
+
+| Operation | Extra memory |
+|---|---|
+| `mrio_graph` construction | **0** |
+| PageRank | 3n `Float64` ≈ 0.6 MB |
+| Louvain / Leiden | O(n) + tile scratch (≈ 512²·8 B ≈ 2 MB) |
+| Similarity (k = 10) | block·n·8 B + k·n·12 B ≈ 20 MB |
+| Spectral | O(n²) workspace, **gated** to n ≤ 5 000 (aggregated graphs) |
+| `to_simple_graph` (opt-in) | 2·m·8 B for m extracted edges, post-pruning |
+
+Do not route graph workflows through the Leontief inverse:
+`LeontiefFactorization.data` materializes a dense n×n inverse (~5 GB per
+matrix at n = 25 000), so graph code never touches it. Graph-only workflows
+should build `mrio_graph(W, nodes)` from their flow matrix and skip `MRIO` /
+Leontief construction entirely. Zero-copy covers `Matrix` and sparse inputs
+(any other `AbstractMatrix` is converted once via `Matrix(W)`).
+
+### Recipes
+
+Graph-only workflow, no Leontief — only the flow matrix and node metadata:
+
+```julia
+g = mrio_graph(W, nodes)
+scores = pagerank_scores(g)
+```
+
+Prune and aggregate before scaling. `threshold` / `min_share` filtering is
+free (applied on the fly); shrinking the node count needs `aggregate` — e.g.
+Eora at ≈ 4.9k nodes (189 countries × 26 sectors) aggregates to 189 country
+nodes. Aggregate both dimensions to keep a square flow table, before
+`:spectral` (size gate) and before similarity runs at Gloria scale
+(20–40k nodes):
+
+```julia
+by_country = aggregate(aggregate(mrio, [:CountryCode]; dims = 1), [:CountryCode]; dims = 2)
+g_small = mrio_graph(by_country)
+communities(g_small; algorithm = :spectral, ncommunities = 10, seed = 1)
+```
+
+Extract a sparse graph only when needed — for Graphs.jl ecosystem algorithms
+that need an edge list (one streaming pass over the already-pruned matrix):
+
+```julia
+simple, distmx = to_simple_graph(g)
+```
+
+Compare two networks or partitions on matched key columns — e.g. two years of
+the same database, or two databases sharing `CountryCode` / `Sector` keys:
+
+```julia
+compare_networks(g_2019, g_2020; match = :keys)
+compare_partitions(communities(g_2019), communities(g_2020))
 ```
 
 ## R Usage
