@@ -13,8 +13,8 @@ sum_cols(x)
 A numeric vector with one value per column of \code{x}.
 }
 \description{
-Calculate the sum of every column of a numeric matrix or MatrixEntry using the
-Julia backend.
+Calculate the sum of every column of a numeric matrix or
+MatrixEntry using the Julia backend.
 }
 \details{
 Sum matrix columns

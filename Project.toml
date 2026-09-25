@@ -1,6 +1,6 @@
 name = "Juliora"
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["theplatters <fscharnreitner@gmail.com>"]
 
 [deps]

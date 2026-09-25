@@ -13,8 +13,8 @@ sum_rows(x)
 A numeric vector with one value per row of \code{x}.
 }
 \description{
-Calculate the sum of every row of a numeric matrix or MatrixEntry using the
-Julia backend.
+Calculate the sum of every row of a numeric matrix or
+MatrixEntry using the Julia backend.
 }
 \details{
 Sum matrix rows

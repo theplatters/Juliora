@@ -96,6 +96,10 @@ wrap_julia_object <- function(proxy) {
     return(new_environmental_extension(proxy))
   } else if (grepl("LeontiefFactorization", jl_type)) {
     return(new_leontief_factorization(proxy))
+  } else if (grepl("MRIOGraph", jl_type)) {
+    return(new_mrio_graph(proxy))
+  } else if (grepl("CommunityResult", jl_type)) {
+    return(new_community_result(proxy))
   } else if (grepl("MRIO", jl_type)) {
     return(new_mrio(proxy))
   }
@@ -118,6 +122,10 @@ unwrap_julia_object <- function(x) {
     return(x$proxy)
   } else if (inherits(x, "MRIO")) {
     return(attr(x, "julia_proxy"))
+  } else if (inherits(x, "MRIOGraph")) {
+    return(x$proxy)
+  } else if (inherits(x, "CommunityResult")) {
+    return(x$proxy)
   } else if (inherits(x, "GroupedMatrixEntry")) {
     return(x$proxy)
   }
