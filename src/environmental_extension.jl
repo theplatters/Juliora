@@ -18,17 +18,23 @@ struct EnvironmentalExtension
 end
 
 """
-	EnvironmentalExtension(path::String, x)
+	EnvironmentalExtension(path::String, x, t_indices, row_mask)
 
 Construct environmental extension from Eora database files.
 
 # Arguments
 - `path::String`: Directory path containing Eora environmental files
 - `x`: Vector of total output by sector (for calculating intensities)
+- `t_indices`: Sector labels matching the (ROW-filtered) economic data
+- `row_mask`: Boolean mask selecting non-ROW entries
+
+# File Layout Requirement
+`Q.txt` columns must align one-to-one with the rows of `T.txt` (one column
+per `T` row, including the `ROW` aggregate region, which `row_mask` filters
+out). A `DimensionMismatch` is thrown otherwise.
 
 # Required Files
 - `Q.txt`: Environmental impacts matrix
-- `labels_T.txt`: Sector labels (for matching with economic data)
 - `labels_Q.txt`: Environmental stressor labels
 
 # Returns
@@ -36,8 +42,9 @@ Construct environmental extension from Eora database files.
 
 # Examples
 ```julia
-# Load environmental data (requires actual data files)
-env_ext = EnvironmentalExtension("data/2017/", total_output_vector)
+# Load environmental data from Eora files (requires actual data files;
+# t_indices/row_mask select the non-ROW sectors matching total_output_vector)
+env_ext = EnvironmentalExtension("data/2017/", total_output_vector, t_indices, row_mask)
 
 # Access CO2 intensities
 co2_intensity = filter_rows(env_ext.A, row -> row.Stressor == "CO2")
@@ -64,15 +71,22 @@ julia> f_matrix = MatrixEntry(f_data, sector_indices, stressor_indices);
 
 julia> a_matrix = MatrixEntry(f_data ./ x_output', sector_indices, stressor_indices);
 
-julia> env_ext = EnvironmentalExtension(a_matrix, f_matrix);
+julia> env_ext = EnvironmentalExtension(f_matrix, a_matrix);
 
 julia> size(env_ext.F.data)
 (3, 2)
 ```
 """
 function EnvironmentalExtension(path::String, x, t_indices, row_mask)
-    f_data = CSV.read(path * "Q.txt", Tables.matrix, header = false)
-    f_indices = @chain read_csv(path * "labels_Q.txt", delim = "\t", col_names = false) begin
+    f_data = CSV.read(joinpath(path, "Q.txt"), Tables.matrix, header = false)
+    size(f_data, 2) == length(row_mask) || throw(
+        DimensionMismatch(
+            "Q.txt has $(size(f_data, 2)) columns but T has $(length(row_mask)) rows; " *
+                "Q.txt columns must align one-to-one with T rows (one column per T row, " *
+                "including the ROW aggregate region, which is filtered out during loading)"
+        )
+    )
+    f_indices = @chain read_csv(joinpath(path, "labels_Q.txt"), delim = "\t", col_names = false) begin
         @select(Stressor = Column1, Source = Column2)
     end
     f = MatrixEntry(f_data[:, row_mask], t_indices, f_indices)

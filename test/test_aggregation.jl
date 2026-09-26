@@ -110,3 +110,108 @@ end
     @test size(mrio_agg_country.T.data, 1) == 2
     @test mrio_agg_country.T.row_indices.CountryCode == ["USA", "CHN"]
 end
+
+@testset "MRIO Aggregation Cols Normalization (Symbol and Vector)" begin
+    sector_indices = DataFrame(
+        CountryCode = ["USA", "USA", "CHN", "CHN"],
+        Sector = ["Primary", "Secondary", "Primary", "Secondary"]
+    )
+    z_data = [
+        10.0 2.0 3.0 1.0;
+        1.0 15.0 2.0 4.0;
+        4.0 1.0 12.0 3.0;
+        2.0 3.0 1.0 18.0
+    ]
+    y_data = [
+        5.0 1.0;
+        2.0 8.0;
+        1.0 3.0;
+        4.0 6.0
+    ]
+    va_data = [
+        2.0 3.0 1.0 4.0;
+        1.0 1.0 2.0 2.0
+    ]
+    z_matrix = IO.MatrixEntry(z_data, sector_indices, sector_indices)
+    y_matrix = IO.MatrixEntry(y_data, DataFrame(CountryCode = ["USA", "CHN"]), sector_indices)
+    va_col_indices = DataFrame(Category = ["Compensation", "Taxes"])
+    va_matrix = IO.MatrixEntry(va_data, sector_indices, va_col_indices)
+    f_data = [1.0 2.0 3.0 4.0; 5.0 6.0 7.0 8.0]
+    f_indices = DataFrame(Stressor = ["CO2", "Water"], Source = ["Fossil", "Fresh"])
+    f_matrix = IO.MatrixEntry(f_data, sector_indices, f_indices)
+    a_matrix = IO.MatrixEntry(f_data ./ [10.0, 20.0, 30.0, 40.0]', sector_indices, f_indices)
+    env = EnvironmentalExtension(f_matrix, a_matrix)
+    mrio = MRIO(
+        z_matrix,
+        z_matrix,
+        va_matrix,
+        y_matrix,
+        IO.calculate_leontief_factorization(z_matrix),
+        SeriesEntry([10.0, 20.0, 30.0, 40.0], sector_indices),
+        env
+    )
+
+    # Symbol and Vector{Symbol} agree for dims=1
+    agg_sym_1 = IO.aggregate(mrio, :Sector; dims = 1)
+    agg_vec_1 = IO.aggregate(mrio, [:Sector]; dims = 1)
+    @test agg_sym_1.T.data == agg_vec_1.T.data
+    @test size(agg_sym_1.T.data, 1) == 2
+    @test agg_sym_1.T.row_indices.Sector == ["Primary", "Secondary"]
+    # dims=1 on this fixture is non-square (2x4): L must be nothing, env kept
+    @test agg_sym_1.L === nothing
+    @test agg_sym_1.env isa EnvironmentalExtension
+    @test agg_sym_1.env.F.data == f_data
+
+    # Symbol and Vector{Symbol} agree for dims=2
+    agg_sym_2 = IO.aggregate(mrio, :Sector; dims = 2)
+    agg_vec_2 = IO.aggregate(mrio, [:Sector]; dims = 2)
+    @test agg_sym_2.T.data == agg_vec_2.T.data
+    @test size(agg_sym_2.T.data, 2) == 2
+    @test agg_sym_2.T.col_indices.Sector == ["Primary", "Secondary"]
+    # dims=2 aggregates env columns as well
+    @test size(agg_sym_2.env.F.data, 2) == 2
+
+    # Multi-column vector grouping works for both dims
+    agg_multi_1 = IO.aggregate(mrio, [:CountryCode, :Sector]; dims = 1)
+    @test size(agg_multi_1.T.data, 1) == 4
+    agg_multi_2 = IO.aggregate(mrio, [:CountryCode, :Sector]; dims = 2)
+    @test size(agg_multi_2.T.data, 2) == 4
+
+    # dims=1 aggregation values: Primary rows (USA_Primary + CHN_Primary)
+    @test agg_sym_1.T.data[1, :] ≈ [14.0, 3.0, 15.0, 4.0]
+end
+
+@testset "MRIO Aggregation Without Environmental Extension" begin
+    sector_indices = DataFrame(
+        CountryCode = ["USA", "USA", "CHN", "CHN"],
+        Sector = ["Primary", "Secondary", "Primary", "Secondary"]
+    )
+    z = IO.MatrixEntry(
+        [10.0 2.0 3.0 1.0; 1.0 15.0 2.0 4.0; 4.0 1.0 12.0 3.0; 2.0 3.0 1.0 18.0],
+        sector_indices,
+        sector_indices
+    )
+    y = IO.MatrixEntry(
+        [5.0 1.0; 2.0 8.0; 1.0 3.0; 4.0 6.0],
+        DataFrame(CountryCode = ["USA", "CHN"]),
+        sector_indices
+    )
+    va = IO.MatrixEntry(
+        [2.0 3.0 1.0 4.0; 1.0 1.0 2.0 2.0],
+        sector_indices,
+        DataFrame(Category = ["Compensation", "Taxes"])
+    )
+    m = MRIO(Z = z, Y = y, VA = va)
+    @test m.env === nothing
+
+    agg1 = IO.aggregate(m, :Sector; dims = 1)
+    @test agg1 isa MRIO
+    @test agg1.env === nothing
+    @test size(agg1.T.data, 1) == 2
+    @test agg1.VA.data ≈ [3.0 7.0; 3.0 3.0]
+    @test agg1.L === nothing  # 2x4 non-square
+
+    agg2 = IO.aggregate(m, :CountryCode; dims = 2)
+    @test agg2.env === nothing
+    @test size(agg2.T.data, 2) == 2
+end

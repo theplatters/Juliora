@@ -32,15 +32,69 @@ as.data.frame.SeriesEntry <- function(x, row.names = NULL, optional = FALSE, ...
   df <- x$col_indices
   n_e <- nrow(df)
   data_proxy <- JuliaConnectoR::juliaCall("Base.getproperty", x$proxy, JuliaConnectoR::juliaEval(":data"))
-  data_vec <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, 1:n_e)
+  data_vec <- JuliaConnectoR::juliaCall("Base.getindex", data_proxy, seq_len(n_e))
   df[[value_name]] <- data_vec
   df
+}
+
+#' Validate an explicit `.dims` argument
+#'
+#' @param .dims Value passed as `.dims` (must not be NULL).
+#' @return The validated `.dims` value.
+#' @noRd
+.validate_dims <- function(.dims) {
+  if (is.logical(.dims) || length(.dims) != 1L || is.na(.dims) || !(.dims %in% c(1, 2))) {
+    stop(".dims must be 1 (rows) or 2 (columns)", call. = FALSE)
+  }
+  .dims
+}
+
+#' Auto-detect the target dimension from expression variable names
+#'
+#' Inspects which index table(s) contain the variable names used in the
+#' expression. Unambiguous matches resolve silently; ambiguous or
+#' undetectable cases warn and default to rows (.dims = 1).
+#'
+#' @param vars Character vector of variable names (e.g. from `all.vars()`).
+#' @param x A MatrixEntry object with `$row_indices` and `$col_indices`.
+#' @return 1 (rows) or 2 (columns).
+#' @noRd
+.detect_dims <- function(vars, x) {
+  in_rows <- any(vars %in% names(x$row_indices))
+  in_cols <- any(vars %in% names(x$col_indices))
+  if (in_rows && in_cols) {
+    ambiguous <- unique(vars[vars %in% names(x$row_indices) & vars %in% names(x$col_indices)])
+    warning(
+      "Column name(s) ",
+      paste0("'", ambiguous, "'", collapse = ", "),
+      " found in both row and column indices; defaulting to rows (.dims = 1). ",
+      "Pass .dims explicitly to disambiguate.",
+      call. = FALSE
+    )
+    return(1)
+  }
+  if (in_cols) {
+    return(2)
+  }
+  if (in_rows) {
+    return(1)
+  }
+  warning(
+    "Could not auto-detect dimension from variable names in the expression; ",
+    "defaulting to rows (.dims = 1). Pass .dims explicitly to disambiguate.",
+    call. = FALSE
+  )
+  1
 }
 
 #' Filter rows or columns of a MatrixEntry using dplyr syntax
 #'
 #' @title Filter MatrixEntry
 #' @description Filter rows or columns of a MatrixEntry using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   expressions without detectable variable names (e.g. tidy-select helpers
+#'   such as all_of() or where(), or positional selection) cannot be
+#'   auto-detected — pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Logical expressions evaluated on row_indices or col_indices.
@@ -52,13 +106,9 @@ filter.MatrixEntry <- function(.data, ..., .dims = NULL) {
   if (is.null(.dims)) {
     # Auto-detect dimension
     vars <- all.vars(substitute(list(...)))
-    in_rows <- any(vars %in% names(.data$row_indices))
-    in_cols <- any(vars %in% names(.data$col_indices))
-    if (in_cols && !in_rows) {
-      .dims <- 2
-    } else {
-      .dims <- 1 # default to rows
-    }
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
   
   if (.dims == 1) {
@@ -106,19 +156,22 @@ filter.SeriesEntry <- function(.data, ...) {
 #'
 #' @title Select MatrixEntry metadata columns
 #' @description Select columns from MatrixEntry index metadata using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   tidy-select helpers (all_of(), where()) or positional selection cannot be
+#'   auto-detected — pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Columns to select.
-#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.
+#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.
 #'
 #' @return A MatrixEntry object.
 #' @export
-select.MatrixEntry <- function(.data, ..., .dims = 1) {
-  vars <- all.vars(substitute(list(...)))
-  in_rows <- any(vars %in% names(.data$row_indices))
-  in_cols <- any(vars %in% names(.data$col_indices))
-  if (in_cols && !in_rows) {
-    .dims <- 2
+select.MatrixEntry <- function(.data, ..., .dims = NULL) {
+  if (is.null(.dims)) {
+    vars <- all.vars(substitute(list(...)))
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
   
   if (.dims == 1) {
@@ -154,19 +207,22 @@ select.SeriesEntry <- function(.data, ...) {
 #'
 #' @title Mutate MatrixEntry metadata columns
 #' @description Mutate MatrixEntry index metadata using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   expressions without detectable variable names cannot be auto-detected —
+#'   pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Mutate expressions.
-#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.
+#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.
 #'
 #' @return A MatrixEntry object.
 #' @export
-mutate.MatrixEntry <- function(.data, ..., .dims = 1) {
-  vars <- all.vars(substitute(list(...)))
-  in_rows <- any(vars %in% names(.data$row_indices))
-  in_cols <- any(vars %in% names(.data$col_indices))
-  if (in_cols && !in_rows) {
-    .dims <- 2
+mutate.MatrixEntry <- function(.data, ..., .dims = NULL) {
+  if (is.null(.dims)) {
+    vars <- all.vars(substitute(list(...)))
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
   
   if (.dims == 1) {
@@ -202,19 +258,22 @@ mutate.SeriesEntry <- function(.data, ...) {
 #'
 #' @title Rename MatrixEntry metadata columns
 #' @description Rename MatrixEntry index metadata using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   expressions without detectable variable names cannot be auto-detected —
+#'   pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Rename expressions.
-#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.
+#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.
 #'
 #' @return A MatrixEntry object.
 #' @export
-rename.MatrixEntry <- function(.data, ..., .dims = 1) {
-  vars <- all.vars(substitute(list(...)))
-  in_rows <- any(vars %in% names(.data$row_indices))
-  in_cols <- any(vars %in% names(.data$col_indices))
-  if (in_cols && !in_rows) {
-    .dims <- 2
+rename.MatrixEntry <- function(.data, ..., .dims = NULL) {
+  if (is.null(.dims)) {
+    vars <- all.vars(substitute(list(...)))
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
   
   if (.dims == 1) {
@@ -250,19 +309,22 @@ rename.SeriesEntry <- function(.data, ...) {
 #'
 #' @title Relocate MatrixEntry metadata columns
 #' @description Relocate MatrixEntry index metadata using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   expressions without detectable variable names (e.g. positional selection)
+#'   cannot be auto-detected — pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Relocate expressions.
-#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.
+#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.
 #'
 #' @return A MatrixEntry object.
 #' @export
-relocate.MatrixEntry <- function(.data, ..., .dims = 1) {
-  vars <- all.vars(substitute(list(...)))
-  in_rows <- any(vars %in% names(.data$row_indices))
-  in_cols <- any(vars %in% names(.data$col_indices))
-  if (in_cols && !in_rows) {
-    .dims <- 2
+relocate.MatrixEntry <- function(.data, ..., .dims = NULL) {
+  if (is.null(.dims)) {
+    vars <- all.vars(substitute(list(...)))
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
   
   if (.dims == 1) {
@@ -306,11 +368,15 @@ relocate.SeriesEntry <- function(.data, ...) {
 #' @return A MatrixEntry object.
 #' @export
 slice.MatrixEntry <- function(.data, ..., .dims = 1) {
+  .dims <- .validate_dims(.dims)
   if (.dims == 1) {
     row_df <- .data$row_indices
     row_df$.row_id <- seq_len(nrow(row_df))
     sliced_row_df <- dplyr::slice(row_df, ...)
     kept_rows <- sliced_row_df$.row_id
+    if (anyDuplicated(kept_rows) > 0L) {
+      stop("slice() with duplicate indices is not supported for MatrixEntry (row/column masks cannot represent repetition)", call. = FALSE)
+    }
     logical_mask <- rep(FALSE, nrow(row_df))
     logical_mask[kept_rows] <- TRUE
     return(.data[logical_mask, ])
@@ -319,6 +385,9 @@ slice.MatrixEntry <- function(.data, ..., .dims = 1) {
     col_df$.col_id <- seq_len(nrow(col_df))
     sliced_col_df <- dplyr::slice(col_df, ...)
     kept_cols <- sliced_col_df$.col_id
+    if (anyDuplicated(kept_cols) > 0L) {
+      stop("slice() with duplicate indices is not supported for MatrixEntry (row/column masks cannot represent repetition)", call. = FALSE)
+    }
     logical_mask <- rep(FALSE, nrow(col_df))
     logical_mask[kept_cols] <- TRUE
     return(.data[, logical_mask])
@@ -342,6 +411,9 @@ slice.SeriesEntry <- function(.data, ...) {
   col_df$.col_id <- seq_len(nrow(col_df))
   sliced_col_df <- dplyr::slice(col_df, ...)
   kept_cols <- sliced_col_df$.col_id
+  if (anyDuplicated(kept_cols) > 0L) {
+    stop("slice() with duplicate indices is not supported for SeriesEntry (masks cannot represent repetition)", call. = FALSE)
+  }
   logical_mask <- rep(FALSE, nrow(col_df))
   logical_mask[kept_cols] <- TRUE
   return(.data[logical_mask])
@@ -351,24 +423,30 @@ slice.SeriesEntry <- function(.data, ...) {
 #'
 #' @title Group MatrixEntry
 #' @description Group MatrixEntry index metadata using dplyr syntax.
+#'   Dimension auto-detection uses variable NAMES in the expression, so
+#'   expressions without detectable variable names cannot be auto-detected —
+#'   pass `.dims` explicitly in those cases.
 #'
 #' @param .data A MatrixEntry object.
 #' @param ... Columns to group by.
 #' @param .add Unused.
 #' @param .drop Unused.
+#' @param .dims An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.
 #'
 #' @return A GroupedMatrixEntry object.
 #' @export
-group_by.MatrixEntry <- function(.data, ..., .add = FALSE, .drop = dplyr::group_by_drop_default(.data)) {
-  vars <- all.vars(substitute(list(...)))
-  in_rows <- any(vars %in% names(.data$row_indices))
-  in_cols <- any(vars %in% names(.data$col_indices))
-  
-  dims <- 1
-  if (in_cols && !in_rows) {
-    dims <- 2
+group_by.MatrixEntry <- function(.data, ..., .add = FALSE, .drop = dplyr::group_by_drop_default(.data), .dims = NULL) {
+  if (is.null(.dims)) {
+    vars <- all.vars(substitute(list(...)))
+    .dims <- .detect_dims(vars, .data)
+  } else {
+    .dims <- .validate_dims(.dims)
   }
-  
+
+  vars <- all.vars(substitute(list(...)))
+
+  dims <- .dims
+
   groupby(.data, vars, dims = dims)
 }
 
@@ -376,33 +454,48 @@ group_by.MatrixEntry <- function(.data, ..., .add = FALSE, .drop = dplyr::group_
 #'
 #' @title Summarize GroupedMatrixEntry
 #' @description Summarize and aggregate a GroupedMatrixEntry using dplyr syntax.
+#'   Supports exactly one aggregation expression per call, using one of the
+#'   supported functions: sum, mean, median, std, min, max, var.
+#'   The output name (e.g. `total` in `total = sum(value)`) is ignored because
+#'   the result is a MatrixEntry, not a data.frame.
 #'
 #' @param .data A GroupedMatrixEntry object.
-#' @param ... Slicing expressions / aggregation functions (e.g. sum(value)).
+#' @param ... A single aggregation call (e.g. sum(value)).
 #' @param .groups Unused.
 #'
 #' @return A MatrixEntry object.
 #' @export
 summarise.GroupedMatrixEntry <- function(.data, ..., .groups = NULL) {
   exprs <- as.list(substitute(list(...))[-1])
-  func_name <- "sum"
-  if (length(exprs) > 0) {
-    expr <- exprs[[1]]
-    if (is.call(expr)) {
-      fn <- expr[[1]]
-      if (is.name(fn)) {
-        func_name <- as.character(fn)
-      } else if (is.call(fn) && length(fn) == 3 && identical(fn[[1]], quote(`::`))) {
-        func_name <- as.character(fn[[3]])
-      }
+  if (length(exprs) != 1L) {
+    stop(
+      "summarise() on a GroupedMatrixEntry supports exactly one aggregation expression, got ",
+      length(exprs),
+      call. = FALSE
+    )
+  }
+  expr <- exprs[[1]]
+  func_name <- NULL
+  if (is.call(expr)) {
+    fn <- expr[[1]]
+    if (is.name(fn)) {
+      func_name <- as.character(fn)
+    } else if (is.call(fn) && length(fn) == 3L && identical(fn[[1]], quote(`::`))) {
+      func_name <- as.character(fn[[3]])
     }
   }
-  
-  if (!func_name %in% c("sum", "mean", "median", "std", "min", "max", "var")) {
-    warning("Function '", func_name, "' might not be recognized; using 'sum' as fallback.", call. = FALSE)
-    func_name <- "sum"
+
+  supported <- c("sum", "mean", "median", "std", "min", "max", "var")
+  if (is.null(func_name) || !(func_name %in% supported)) {
+    stop(
+      "Unsupported aggregation function ",
+      if (is.null(func_name)) "(expression is not a function call)" else paste0("'", func_name, "'"),
+      "; supported functions are: ",
+      paste(supported, collapse = ", "),
+      call. = FALSE
+    )
   }
-  
+
   jl_func <- if (func_name == "sum") {
     "Base.sum"
   } else if (func_name == "mean") {
@@ -417,10 +510,8 @@ summarise.GroupedMatrixEntry <- function(.data, ..., .groups = NULL) {
     "Base.minimum"
   } else if (func_name == "max") {
     "Base.maximum"
-  } else {
-    "Base.sum"
   }
-  
+
   aggregate(.data, jl_func)
 }
 

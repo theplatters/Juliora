@@ -20,6 +20,9 @@ A GroupedMatrixEntry object.
 }
 \description{
 Group MatrixEntry index metadata using dplyr syntax.
+Dimension auto-detection uses variable NAMES in the expression, so
+expressions without detectable variable names cannot be auto-detected —
+pass \code{.dims} explicitly in those cases.
 }
 \details{
 Group MatrixEntry index metadata using dplyr syntax

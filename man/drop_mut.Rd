@@ -9,7 +9,7 @@ drop_mut(m, indices, dims = 1)
 \arguments{
 \item{m}{A MatrixEntry object.}
 
-\item{indices}{A named list (representing a NamedTuple).}
+\item{indices}{A named list (representing a NamedTuple) or a list of named lists (representing a vector of NamedTuples).}
 
 \item{dims}{An integer specifying the dimension: 1 for rows, 2 for columns (default: 1).}
 }
@@ -18,12 +18,17 @@ The modified MatrixEntry object.
 }
 \description{
 Modifies a MatrixEntry object in-place by dropping rows or columns.
+
+The underlying Julia object is mutated in place: ALL R references sharing
+the same Julia proxy observe the change. Note that cached index
+data.frames of OTHER R wrapper copies are NOT refreshed, so reassignment
+(\code{m <- drop_mut(m, ...)}) is the safe idiom.
 }
 \details{
 Drop rows or columns from a MatrixEntry in place (modifies the object)
 }
 \examples{
 \dontrun{
-drop_mut(me, list(Country = "USA"), dims = 1)
+m <- drop_mut(m, list(Country = "USA"), dims = 1)
 }
 }

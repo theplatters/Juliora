@@ -44,5 +44,5 @@ test_that("sectors returns the same character representation for Gloria and Eora
 })
 
 test_that("sectors reports invalid inputs as native R errors", {
-  expect_error(sectors(42), "Julia Error")
+  expect_error(sectors(42), "must be a Juliora wrapper object")
 })

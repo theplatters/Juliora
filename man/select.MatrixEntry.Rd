@@ -11,13 +11,16 @@
 
 \item{...}{Columns to select.}
 
-\item{.dims}{An optional integer: 1 for row_indices, 2 for col_indices. Auto-detected by default.}
+\item{.dims}{An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.}
 }
 \value{
 A MatrixEntry object.
 }
 \description{
 Select columns from MatrixEntry index metadata using dplyr syntax.
+Dimension auto-detection uses variable NAMES in the expression, so
+tidy-select helpers (all_of(), where()) or positional selection cannot be
+auto-detected — pass \code{.dims} explicitly in those cases.
 }
 \details{
 Select columns from MatrixEntry index metadata using dplyr syntax

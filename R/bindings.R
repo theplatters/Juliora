@@ -32,7 +32,8 @@ Eora <- function(path) {
   if (!is.character(path) || length(path) != 1) {
     stop("Argument 'path' must be a single character string.", call. = FALSE)
   }
-  
+  path <- normalizePath(path, mustWork = FALSE)
+
   get_julia_connection()
   
   res <- tryCatch({
@@ -70,7 +71,8 @@ Gloria <- function(path, version, year) {
   if (!is.numeric(year) || length(year) != 1) {
     stop("Argument 'year' must be an integer.", call. = FALSE)
   }
-  
+  path <- normalizePath(path, mustWork = FALSE)
+
   get_julia_connection()
   
   res <- tryCatch({
@@ -146,7 +148,8 @@ parse_gloria <- function(path, year, version = 60) {
   if (!is.numeric(version) || length(version) != 1) {
     stop("Argument 'version' must be an integer.", call. = FALSE)
   }
-  
+  path <- normalizePath(path, mustWork = FALSE)
+
   get_julia_connection()
   
   res <- tryCatch({
@@ -167,12 +170,18 @@ parse_gloria <- function(path, year, version = 60) {
 #' @param year An integer specifying the database year.
 #' @param version An integer specifying the Gloria version (default: 60).
 #'
-#' @return An MRIO object wrapping the Julia MRIO database.
+#' @return A Julia Tuple proxy of four numeric matrices: S (supply), U (use),
+#'   Y (final demand), VA (value added). Julia Tuples cross the R boundary as
+#'   opaque proxies (not R lists); extract element `i` with
+#'   `JuliaConnectoR::juliaCall("Base.getindex", x, i)`.
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' sut_db <- parse_gloria_sut("data/GLORIA/", 2019, version = 60)
+#' # Returns an opaque Julia Tuple proxy of four raw matrices (S, U, Y, VA),
+#' # not an MRIO object. Extract element i via
+#' # JuliaConnectoR::juliaCall("Base.getindex", sut, i).
+#' sut <- parse_gloria_sut("data/GLORIA/", 2019, version = 60)
 #' }
 parse_gloria_sut <- function(path, year, version = 60) {
   if (!is.character(path) || length(path) != 1) {
@@ -184,7 +193,8 @@ parse_gloria_sut <- function(path, year, version = 60) {
   if (!is.numeric(version) || length(version) != 1) {
     stop("Argument 'version' must be an integer.", call. = FALSE)
   }
-  
+  path <- normalizePath(path, mustWork = FALSE)
+
   get_julia_connection()
   
   res <- tryCatch({
@@ -408,16 +418,19 @@ groupby <- function(m, cols, dims = 1) {
   if (!is.character(cols)) {
     stop("Argument 'cols' must be a character vector of column names.", call. = FALSE)
   }
-  if (!dims %in% c(1, 2)) {
+  if (length(dims) != 1 || is.na(dims) || !dims %in% c(1, 2)) {
     stop("Argument 'dims' must be 1 or 2.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  
+
+  # Single Symbols cross via juliaCall("Symbol", ...); a multi-column
+  # grouping is passed as one R list of Symbols, which JuliaConnectoR
+  # delivers as a single Vector{Symbol} argument.
   cols_jl <- if (length(cols) == 1) {
-    JuliaConnectoR::juliaEval(sprintf("Symbol(\"%s\")", cols))
+    JuliaConnectoR::juliaCall("Symbol", cols)
   } else {
-    JuliaConnectoR::juliaCall("Vector{Symbol}", as.list(cols))
+    lapply(cols, function(col) JuliaConnectoR::juliaCall("Symbol", col))
   }
   
   res <- tryCatch({
@@ -434,37 +447,50 @@ groupby <- function(m, cols, dims = 1) {
 #' @title Aggregate GroupedMatrixEntry
 #' @description Aggregate matrix data grouped by groupby.
 #'
-#' @param gm A GroupedMatrixEntry object.
-#' @param func An R function (e.g. sum, mean) or character string naming a Julia function (e.g. "sum", "mean").
+#' @param x A GroupedMatrixEntry object.
+#' @param func An aggregation. Either a character string naming a Julia function
+#'   (e.g. `"sum"`, `"mean"`, `"median"`, `"std"`, `"var"`, `"min"`, `"max"`), or
+#'   one of the base/stats R functions `sum`, `mean`, `min`, `max`, `median`,
+#'   `var`, `sd` (these are mapped to their Julia equivalents). A custom R
+#'   closure is forwarded as a callback and must accept `(matrix, dims)` and
+#'   return the matrix reduced along `dims`.
+#' @param ... Unused, for S3 consistency with \code{\link[stats]{aggregate}}.
 #'
 #' @return A MatrixEntry object.
-#' @export
+#' @exportS3Method stats::aggregate
+#' @importFrom stats aggregate
 #'
 #' @examples
 #' \dontrun{
 #' aggregated <- aggregate(gm, "sum")
 #' }
-aggregate <- function(gm, func) {
-  if (!inherits(gm, "GroupedMatrixEntry")) {
-    stop("Argument 'gm' must be a GroupedMatrixEntry object.", call. = FALSE)
+aggregate.GroupedMatrixEntry <- function(x, func, ...) {
+  if (!inherits(x, "GroupedMatrixEntry")) {
+    stop("Argument 'x' must be a GroupedMatrixEntry object.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  
-  func_jl <- if (is.character(func)) {
+
+  # Character strings are passed through to Julia's `aggregate` AbstractString
+  # method (resolved via `Juliora.string_to_func`). Common R aggregation
+  # functions are mapped to those same strings for correct, fast reduction;
+  # any other R closure is passed directly as a JuliaConnectoR callback (it must
+  # accept `(matrix, dims)` and return a matrix reduced along `dims`).
+  func_jl <- if (is.character(func) && length(func) == 1 && !is.na(func)) {
     func
   } else if (is.function(func)) {
-    JuliaConnectoR::juliaFun(func)
+    mapped <- .julia_agg_name(func)
+    if (!is.null(mapped)) mapped else func
   } else {
-    stop("Argument 'func' must be a function or a character string naming a Julia function.", call. = FALSE)
+    stop("Argument 'func' must be a function or a single character string naming a Julia function.", call. = FALSE)
   }
-  
+
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.aggregate", unwrap_julia_object(gm), func_jl)
+    JuliaConnectoR::juliaCall("Juliora.aggregate", unwrap_julia_object(x), func_jl)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
 }
 
@@ -490,17 +516,17 @@ filter_rows <- function(m, condition_func) {
   if (!is.function(condition_func)) {
     stop("Argument 'condition_func' must be a function.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  
-  func_jl <- JuliaConnectoR::juliaFun(condition_func)
-  
+
+  # The R closure is passed directly: JuliaConnectoR forwards it to Julia via
+  # its callback mechanism.
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.filter_rows", unwrap_julia_object(m), func_jl)
+    JuliaConnectoR::juliaCall("Juliora.filter_rows", unwrap_julia_object(m), condition_func)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
 }
 
@@ -526,18 +552,44 @@ filter_cols <- function(m, condition_func) {
   if (!is.function(condition_func)) {
     stop("Argument 'condition_func' must be a function.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  
-  func_jl <- JuliaConnectoR::juliaFun(condition_func)
-  
+
+  # The R closure is passed directly: JuliaConnectoR forwards it to Julia via
+  # its callback mechanism.
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.filter_cols", unwrap_julia_object(m), func_jl)
+    JuliaConnectoR::juliaCall("Juliora.filter_cols", unwrap_julia_object(m), condition_func)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
+}
+
+#' Drop redundant dimensions, or drop rows/columns from Juliora objects
+#'
+#' @title Drop
+#' @description An S3 generic. For base R objects (matrices, arrays) it delegates
+#'   to [base::drop] and removes length-1 dimensions. For Juliora objects
+#'   (`MatrixEntry`, `LeontiefFactorization`) it drops rows or columns selected by
+#'   a named list (NamedTuple) or list of named lists. Defining `drop` as a
+#'   generic (with a `default` that calls [base::drop]) preserves the base R
+#'   behaviour of `drop(x)` while enabling dispatch for Juliora types.
+#'
+#' @param x An R object, or a `MatrixEntry`/`LeontiefFactorization`.
+#' @param ... Further arguments passed to methods.
+#'
+#' @return For base objects, the object with length-1 dimensions dropped. For
+#'   Juliora objects, a new object with the selected rows/columns removed.
+#' @export
+drop <- function(x, ...) {
+  UseMethod("drop")
+}
+
+#' @rdname drop
+#' @export
+drop.default <- function(x, ...) {
+  base::drop(x)
 }
 
 #' Drop rows or columns from a MatrixEntry
@@ -545,9 +597,10 @@ filter_cols <- function(m, condition_func) {
 #' @title Drop rows or columns
 #' @description Drop rows or columns from a MatrixEntry using a named list (NamedTuple) or list of named lists.
 #'
-#' @param m A MatrixEntry object.
+#' @param x A MatrixEntry object.
 #' @param indices A named list (representing a NamedTuple) or a list of named lists (representing a vector of NamedTuples).
 #' @param dims An integer specifying the dimension: 1 for rows, 2 for columns (default: 1).
+#' @param ... Unused, for S3 consistency with \code{\link[base]{drop}}.
 #'
 #' @return A MatrixEntry object.
 #' @export
@@ -556,28 +609,68 @@ filter_cols <- function(m, condition_func) {
 #' \dontrun{
 #' dropped <- drop(me, list(Country = "USA"), dims = 1)
 #' }
-drop <- function(m, indices, dims = 1) {
-  if (!inherits(m, "MatrixEntry")) {
-    stop("Argument 'm' must be a MatrixEntry object.", call. = FALSE)
+drop.MatrixEntry <- function(x, indices, dims = 1, ...) {
+  if (!inherits(x, "MatrixEntry")) {
+    stop("Argument 'x' must be a MatrixEntry object.", call. = FALSE)
   }
-  if (!dims %in% c(1, 2)) {
+  if (length(dims) != 1 || is.na(dims) || !dims %in% c(1, 2)) {
     stop("Argument 'dims' must be 1 or 2.", call. = FALSE)
   }
-  
+
+  drop_impl(x, indices, dims)
+}
+
+#' Drop rows or columns from a LeontiefFactorization
+#'
+#' @title Drop LeontiefFactorization rows or columns
+#' @description Drop rows or columns from a LeontiefFactorization using a named list (NamedTuple) or list of named lists.
+#'
+#' @param x A LeontiefFactorization object.
+#' @param indices A named list (representing a NamedTuple) or a list of named lists (representing a vector of NamedTuples).
+#' @param dims An integer specifying the dimension: 1 for rows, 2 for columns (default: 1).
+#' @param ... Unused, for S3 consistency with \code{\link[base]{drop}}.
+#'
+#' @return A LeontiefFactorization object.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' dropped <- drop(lf, list(Country = "USA"), dims = 1)
+#' }
+drop.LeontiefFactorization <- function(x, indices, dims = 1, ...) {
+  if (!inherits(x, "LeontiefFactorization")) {
+    stop("Argument 'x' must be a LeontiefFactorization object.", call. = FALSE)
+  }
+  if (length(dims) != 1 || is.na(dims) || !dims %in% c(1, 2)) {
+    stop("Argument 'dims' must be 1 or 2.", call. = FALSE)
+  }
+
+  drop_impl(x, indices, dims)
+}
+
+#' Shared implementation for drop S3 methods
+#'
+#' @param m A MatrixEntry or LeontiefFactorization object.
+#' @param indices A named list or a list of named lists.
+#' @param dims A validated dimension (1 or 2).
+#' @return A wrapped Julia object.
+#' @noRd
+#' @keywords internal
+drop_impl <- function(m, indices, dims) {
   get_julia_connection()
-  
+
   indices_jl <- if (!is.null(names(indices))) {
     to_named_tuple(indices)
   } else {
     to_named_tuple_vector(indices)
   }
-  
+
   res <- tryCatch({
     JuliaConnectoR::juliaCall("Juliora.drop", unwrap_julia_object(m), indices_jl, dims = as.integer(dims))
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
 }
 
@@ -586,8 +679,13 @@ drop <- function(m, indices, dims = 1) {
 #' @title Drop rows or columns in-place
 #' @description Modifies a MatrixEntry object in-place by dropping rows or columns.
 #'
+#' The underlying Julia object is mutated in place: ALL R references sharing
+#' the same Julia proxy observe the change. Note that cached index
+#' data.frames of OTHER R wrapper copies are NOT refreshed, so reassignment
+#' (`m <- drop_mut(m, ...)`) is the safe idiom.
+#'
 #' @param m A MatrixEntry object.
-#' @param indices A named list (representing a NamedTuple).
+#' @param indices A named list (representing a NamedTuple) or a list of named lists (representing a vector of NamedTuples).
 #' @param dims An integer specifying the dimension: 1 for rows, 2 for columns (default: 1).
 #'
 #' @return The modified MatrixEntry object.
@@ -595,29 +693,44 @@ drop <- function(m, indices, dims = 1) {
 #'
 #' @examples
 #' \dontrun{
-#' drop_mut(me, list(Country = "USA"), dims = 1)
+#' m <- drop_mut(m, list(Country = "USA"), dims = 1)
 #' }
 drop_mut <- function(m, indices, dims = 1) {
   if (!inherits(m, "MatrixEntry")) {
     stop("Argument 'm' must be a MatrixEntry object.", call. = FALSE)
   }
-  if (!dims %in% c(1, 2)) {
+  if (length(dims) != 1 || is.na(dims) || !dims %in% c(1, 2)) {
     stop("Argument 'dims' must be 1 or 2.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  
-  indices_jl <- to_named_tuple(indices)
-  
+
+  # Accept the same index forms as `drop`: a single named list becomes one
+  # NamedTuple, an (unnamed) list of named lists becomes one NamedTuple per
+  # element. Julia's `drop!` only takes a single NamedTuple, so multiple keys
+  # are applied with repeated in-place calls.
+  index_list <- if (!is.null(names(indices))) {
+    list(to_named_tuple(indices))
+  } else if (is.list(indices) && length(indices) > 0 &&
+      all(vapply(indices, function(el) is.list(el) && !is.null(names(el)), logical(1)))) {
+    lapply(indices, to_named_tuple)
+  } else {
+    stop("Argument 'indices' must be a named list or a list of named lists.", call. = FALSE)
+  }
+
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.drop!", unwrap_julia_object(m), indices_jl, dims = as.integer(dims))
+    proxy <- unwrap_julia_object(m)
+    for (indices_jl in index_list) {
+      proxy <- JuliaConnectoR::juliaCall("Juliora.drop!", proxy, indices_jl, dims = as.integer(dims))
+    }
+    proxy
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
   
   # Update R S3 object's native fields
-  m$col_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":col_indices")))
-  m$row_indices <- as.data.frame(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":row_indices")))
+  m$col_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":col_indices")))
+  m$row_indices <- .julia_df_to_dataframe(JuliaConnectoR::juliaCall("Base.getproperty", m$proxy, JuliaConnectoR::juliaEval(":row_indices")))
   
   return(m)
 }
@@ -647,16 +760,15 @@ filter_matrix <- function(m, row_condition, col_condition) {
   }
   
   get_julia_connection()
-  
-  row_cond_jl <- JuliaConnectoR::juliaFun(row_condition)
-  col_cond_jl <- JuliaConnectoR::juliaFun(col_condition)
-  
+
+  # R closures are passed directly: JuliaConnectoR forwards them to Julia via
+  # its callback mechanism.
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.filter_matrix", unwrap_julia_object(m), row_cond_jl, col_cond_jl)
+    JuliaConnectoR::juliaCall("Juliora.filter_matrix", unwrap_julia_object(m), row_condition, col_condition)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
 }
 
@@ -668,7 +780,9 @@ filter_matrix <- function(m, row_condition, col_condition) {
 #' @param m A MatrixEntry object.
 #' @param value_name A character string specifying the name of the value column (default: "value").
 #'
-#' @return A data.frame.
+#' @return A data.frame with one row per matrix element. Row metadata columns
+#'   are prefixed with `row_`, column metadata columns with `col_`, and the
+#'   matrix values are in the column named `value_name`.
 #' @export
 #'
 #' @examples
@@ -734,7 +848,11 @@ from_long_dataframe <- function(df, value_col = "value", row_prefix = "row_", co
 #'
 #' @param m A MatrixEntry object.
 #' @param ... Column names (symbols or character strings) to group by.
-#' @param agg_func An R function or Julia function name (default: "sum" or sum).
+#' @param agg_func An aggregation: a character string naming a Julia function
+#'   (default `"sum"`; e.g. `"mean"`, `"median"`, `"std"`, `"var"`, `"min"`,
+#'   `"max"`), or one of the base/stats R functions `sum`, `mean`, `min`, `max`,
+#'   `median`, `var`, `sd` (mapped to their Julia equivalents). Any other R
+#'   closure is forwarded as a JuliaConnectoR callback.
 #' @param rows A logical value indicating whether to group rows (TRUE) or columns (FALSE) (default: TRUE).
 #' @param value_name A character string specifying the name of the value column (default: "value").
 #'
@@ -749,30 +867,38 @@ groupby_matrix <- function(m, ..., agg_func = "sum", rows = TRUE, value_name = "
   if (!is_matrix_entry(m)) {
     stop("Argument 'm' must be a MatrixEntry or LeontiefFactorization object.", call. = FALSE)
   }
-  
-  grouping_cols <- list(...)
-  grouping_cols <- lapply(grouping_cols, function(col) {
-    if (is.name(col) || is.symbol(col)) {
-      as.character(col)
-    } else {
-      as.character(col)
-    }
-  })
-  
+
+  grouping_cols <- vapply(list(...), as.character, character(1))
+  if (any(!nzchar(grouping_cols))) {
+    stop("Grouping columns must be non-empty strings.", call. = FALSE)
+  }
+
   get_julia_connection()
-  
+
+  # Character aggregation names are passed straight through to Julia, whose
+  # groupby_matrix resolves them via `string_to_func`. Common R aggregation
+  # functions are mapped to those same names; any other closure is passed as a
+  # JuliaConnectoR callback.
   agg_func_jl <- if (is.character(agg_func)) {
-    JuliaConnectoR::juliaEval(agg_func)
+    if (length(agg_func) != 1 || is.na(agg_func)) {
+      stop("Argument 'agg_func' must be a single function name or a function.", call. = FALSE)
+    }
+    agg_func
   } else if (is.function(agg_func)) {
-    JuliaConnectoR::juliaFun(agg_func)
+    mapped <- .julia_agg_name(agg_func)
+    if (!is.null(mapped)) mapped else agg_func
   } else {
     stop("Argument 'agg_func' must be a function or a character string naming a Julia function.", call. = FALSE)
   }
-  
-  grouping_cols_jl <- lapply(grouping_cols, function(col) JuliaConnectoR::juliaEval(paste0(":", col)))
-  
+
+  # Pass the grouping columns as a single list of Julia Symbols (delivered as
+  # one Vector{Symbol}), matching the Julia `groupby_matrix(::AbstractVector)`
+  # method — the same mechanism the working `groupby` wrapper uses. Splicing
+  # them as separate varargs mis-serializes across JuliaConnectoR.
+  grouping_cols_jl <- lapply(grouping_cols, function(col) JuliaConnectoR::juliaCall("Symbol", col))
+
   res <- tryCatch({
-    do.call(JuliaConnectoR::juliaCall, c(list("Juliora.groupby_matrix", unwrap_julia_object(m)), grouping_cols_jl, list(agg_func = agg_func_jl, rows = rows, value_name = value_name)))
+    JuliaConnectoR::juliaCall("Juliora.groupby_matrix", unwrap_julia_object(m), grouping_cols_jl, agg_func = agg_func_jl, rows = rows, value_name = value_name)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
@@ -799,12 +925,12 @@ sum_by_country <- function(m, dimension = "both") {
   if (!is_matrix_entry(m)) {
     stop("Argument 'm' must be a MatrixEntry or LeontiefFactorization object.", call. = FALSE)
   }
-  if (!dimension %in% c("both", "rows", "cols")) {
+  if (length(dimension) != 1 || is.na(dimension) || !dimension %in% c("both", "rows", "cols")) {
     stop("Argument 'dimension' must be one of 'both', 'rows', or 'cols'.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  dim_jl <- JuliaConnectoR::juliaEval(paste0(":", dimension))
+  dim_jl <- JuliaConnectoR::juliaCall("Symbol", dimension)
   
   res <- tryCatch({
     JuliaConnectoR::juliaCall("Juliora.sum_by_country", unwrap_julia_object(m), dimension = dim_jl)
@@ -834,12 +960,12 @@ sum_by_sector <- function(m, dimension = "both") {
   if (!is_matrix_entry(m)) {
     stop("Argument 'm' must be a MatrixEntry or LeontiefFactorization object.", call. = FALSE)
   }
-  if (!dimension %in% c("both", "rows", "cols")) {
+  if (length(dimension) != 1 || is.na(dimension) || !dimension %in% c("both", "rows", "cols")) {
     stop("Argument 'dimension' must be one of 'both', 'rows', or 'cols'.", call. = FALSE)
   }
-  
+
   get_julia_connection()
-  dim_jl <- JuliaConnectoR::juliaEval(paste0(":", dimension))
+  dim_jl <- JuliaConnectoR::juliaCall("Symbol", dimension)
   
   res <- tryCatch({
     JuliaConnectoR::juliaCall("Juliora.sum_by_sector", unwrap_julia_object(m), dimension = dim_jl)
@@ -879,16 +1005,17 @@ add_calculated_column <- function(m, col_name, calculation_func, to_rows = TRUE)
   }
   
   get_julia_connection()
-  
-  col_name_jl <- JuliaConnectoR::juliaEval(paste0(":", col_name))
-  calc_func_jl <- JuliaConnectoR::juliaFun(calculation_func)
-  
+
+  # The R closure is passed directly: JuliaConnectoR forwards it to Julia via
+  # its callback mechanism.
+  col_name_jl <- JuliaConnectoR::juliaCall("Symbol", col_name)
+
   res <- tryCatch({
-    JuliaConnectoR::juliaCall("Juliora.add_calculated_column", unwrap_julia_object(m), col_name_jl, calc_func_jl, to_rows = to_rows)
+    JuliaConnectoR::juliaCall("Juliora.add_calculated_column", unwrap_julia_object(m), col_name_jl, calculation_func, to_rows = to_rows)
   }, error = function(e) {
     stop("Julia Error: ", e$message, call. = FALSE)
   })
-  
+
   wrap_julia_object(res)
 }
 
@@ -923,11 +1050,12 @@ pivot_matrix_to_wide <- function(m, row_vars, col_var, value_var = "value") {
   get_julia_connection()
   
   row_vars_jl <- if (length(row_vars) == 1) {
-    JuliaConnectoR::juliaEval(sprintf("Symbol(\"%s\")", row_vars))
+    JuliaConnectoR::juliaCall("Symbol", row_vars)
   } else {
-    JuliaConnectoR::juliaCall("Vector{Symbol}", as.list(row_vars))
+    # One R list of Symbols, delivered as a single Vector{Symbol} argument.
+    lapply(row_vars, function(col) JuliaConnectoR::juliaCall("Symbol", col))
   }
-  col_var_jl <- JuliaConnectoR::juliaEval(sprintf("Symbol(\"%s\")", col_var))
+  col_var_jl <- JuliaConnectoR::juliaCall("Symbol", col_var)
   
   res <- tryCatch({
     JuliaConnectoR::juliaCall("Juliora.pivot_matrix_to_wide", unwrap_julia_object(m), row_vars_jl, col_var_jl, value_var)
@@ -1086,6 +1214,20 @@ induced_production <- function(mrio, consumer_countries = character(), producer_
   as.data.frame(res)
 }
 
+# Internal helper: light validation for the metadata helpers below. Accepts
+# Juliora wrapper objects and data.frames; anything else is rejected with a
+# helpful native R error.
+check_metadata_input <- function(x, fun_name) {
+  juliora_classes <- c("MRIO", "MatrixEntry", "SeriesEntry",
+    "EnvironmentalExtension", "LeontiefFactorization",
+    "GroupedMatrixEntry", "GroupedSeriesEntry")
+  if (!is.data.frame(x) && !inherits(x, juliora_classes)) {
+    stop("Argument 'x' to '", fun_name, "' must be a Juliora wrapper object (",
+      paste(juliora_classes, collapse = ", "), ") or a data.frame.", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 #' Get unique countries in the MRIO database or data structure
 #'
 #' @title Get available countries
@@ -1101,6 +1243,7 @@ induced_production <- function(mrio, consumer_countries = character(), producer_
 #' countries(mrio_db)
 #' }
 countries <- function(x) {
+  check_metadata_input(x, "countries")
   get_julia_connection()
   
   res <- tryCatch({
@@ -1150,6 +1293,7 @@ country <- function(x) {
 #' sectors(mrio_db)
 #' }
 sectors <- function(x) {
+  check_metadata_input(x, "sectors")
   get_julia_connection()
   
   res <- tryCatch({
@@ -1197,6 +1341,7 @@ sector <- function(x) {
 #' stressors(mrio_db)
 #' }
 stressors <- function(x) {
+  check_metadata_input(x, "stressors")
   get_julia_connection()
   
   res <- tryCatch({
@@ -1233,17 +1378,28 @@ stressor <- function(x) {
 #' @param ... Logical expressions.
 #' @param .dims Dimension to filter: 1 for rows, 2 for columns.
 #' @return A filtered MRIO object.
-#' @export
+#' @exportS3Method dplyr::filter
 filter.MRIO <- function(.data, ..., .dims = 1) {
-  if (!.dims %in% c(1, 2)) {
+  if (length(.dims) != 1 || is.na(.dims) || !.dims %in% c(1, 2)) {
     stop("Argument '.dims' must be 1 (rows) or 2 (columns).", call. = FALSE)
   }
+  warning("Filtering an MRIO does not preserve the environmental extension; ",
+    "the result has no attached environmental data.", call. = FALSE)
+  if (.dims == 2) {
+    warning("For column filtering (.dims = 2), the VA mask assumes row and ",
+      "column metadata coincide (square MRIO convention).", call. = FALSE)
+  }
+  warning("Filtered (non-square) MRIO results carry placeholder ",
+    "technical-coefficient (A) and Leontief (L) factors.", call. = FALSE)
   meta <- if (.dims == 1) .data$Z$row_indices else .data$Z$col_indices
   meta$.row_idx_temp <- seq_len(nrow(meta))
   filtered_meta <- dplyr::filter(meta, ...)
   mask <- logical(nrow(meta))
   mask[filtered_meta$.row_idx_temp] <- TRUE
-  
+  if (!any(mask)) {
+    stop("filter() on MRIO produced an empty selection; an MRIO requires at least one remaining row/column.", call. = FALSE)
+  }
+
   get_julia_connection()
   if (.dims == 1) {
     new_Z <- .data$Z[mask, ]

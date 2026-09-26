@@ -3,7 +3,7 @@
 library(Juliora)
 
 # Configure database location and parameters
-gloria_path <- "data/GLORIA/2019/"
+gloria_path <- Sys.getenv("JULIORA_GLORIA_DATA", unset = "data/GLORIA/2019/")
 gloria_year <- 2019
 gloria_version <- 60
 
@@ -18,7 +18,8 @@ EU_codes <- c(
 )
 
 cat("2. Extracting and summing European Final Demand...\n")
-# We pull Y's metadata and Y's data (Y is very small, so this is extremely fast)
+# We pull Y's metadata and Y's data (Y is very small, so this is extremely fast).
+# Note: `db$Y$data[...]` pulls a full R-side copy of the data matrix.
 eu_cols_mask <- db$Y$col_indices$CountryCode %in% EU_codes
 total_eu_demand <- sum(db$Y$data[, eu_cols_mask])
 

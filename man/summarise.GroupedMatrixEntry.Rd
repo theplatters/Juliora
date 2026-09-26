@@ -9,7 +9,7 @@
 \arguments{
 \item{.data}{A GroupedMatrixEntry object.}
 
-\item{...}{Slicing expressions / aggregation functions (e.g. sum(value)).}
+\item{...}{A single aggregation call (e.g. sum(value)).}
 
 \item{.groups}{Unused.}
 }
@@ -18,6 +18,10 @@ A MatrixEntry object.
 }
 \description{
 Summarize and aggregate a GroupedMatrixEntry using dplyr syntax.
+Supports exactly one aggregation expression per call, using one of the
+supported functions: sum, mean, median, std, min, max, var.
+The output name (e.g. \code{total} in \code{total = sum(value)}) is ignored because
+the result is a MatrixEntry, not a data.frame.
 }
 \details{
 Summarize and aggregate a GroupedMatrixEntry using dplyr syntax

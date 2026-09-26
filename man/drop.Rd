@@ -2,28 +2,30 @@
 % Please edit documentation in R/bindings.R
 \name{drop}
 \alias{drop}
-\title{Drop rows or columns}
+\alias{drop.default}
+\title{Drop}
 \usage{
-drop(m, indices, dims = 1)
+drop(x, ...)
+
+\method{drop}{default}(x, ...)
 }
 \arguments{
-\item{m}{A MatrixEntry object.}
+\item{x}{An R object, or a \code{MatrixEntry}/\code{LeontiefFactorization}.}
 
-\item{indices}{A named list (representing a NamedTuple) or a list of named lists (representing a vector of NamedTuples).}
-
-\item{dims}{An integer specifying the dimension: 1 for rows, 2 for columns (default: 1).}
+\item{...}{Further arguments passed to methods.}
 }
 \value{
-A MatrixEntry object.
+For base objects, the object with length-1 dimensions dropped. For
+Juliora objects, a new object with the selected rows/columns removed.
 }
 \description{
-Drop rows or columns from a MatrixEntry using a named list (NamedTuple) or list of named lists.
+An S3 generic. For base R objects (matrices, arrays) it delegates
+to \link[base:drop]{base::drop} and removes length-1 dimensions. For Juliora objects
+(\code{MatrixEntry}, \code{LeontiefFactorization}) it drops rows or columns selected by
+a named list (NamedTuple) or list of named lists. Defining \code{drop} as a
+generic (with a \code{default} that calls \link[base:drop]{base::drop}) preserves the base R
+behaviour of \code{drop(x)} while enabling dispatch for Juliora types.
 }
 \details{
-Drop rows or columns from a MatrixEntry
-}
-\examples{
-\dontrun{
-dropped <- drop(me, list(Country = "USA"), dims = 1)
-}
+Drop redundant dimensions, or drop rows/columns from Juliora objects
 }

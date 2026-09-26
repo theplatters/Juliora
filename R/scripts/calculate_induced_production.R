@@ -1,13 +1,16 @@
 # Set local library path to load Juliora
 .libPaths(c("R_libs", .libPaths()))
 library(Juliora)
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  stop("Package 'ggplot2' is required by this script but is not installed.", call. = FALSE)
+}
 library(ggplot2)
 
 # Create plots directory if it doesn't exist
 dir.create("R/plots", showWarnings = FALSE, recursive = TRUE)
 
 # Configure database location and parameters
-gloria_path <- "data/GLORIA/2019/"
+gloria_path <- Sys.getenv("JULIORA_GLORIA_DATA", unset = "data/GLORIA/2019/")
 gloria_year <- 2019
 gloria_version <- 60
 

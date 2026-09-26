@@ -327,6 +327,27 @@ library(Juliora)
 is_julia_available()
 ```
 
+### Julia project discovery
+
+On first use, the R bindings locate the Julia project (the directory
+containing `Project.toml`) in the following order:
+
+1. the `juliora.julia_project` R option,
+2. the `JULIORA_JULIA_PROJECT` environment variable,
+3. the installed package directory,
+4. the current working directory and its parents,
+5. `"."` as a fallback.
+
+```r
+options(juliora.julia_project = "/path/to/Juliora")
+```
+
+If an explicitly configured location (option or environment variable) does
+not contain a `Project.toml`, it is ignored with a warning. Use
+`juliora_reset()` to clear the cached connection state so the next call
+re-runs discovery (pass `julia_stop = TRUE` to also shut down the Julia
+server).
+
 Create and inspect labeled data:
 
 ```r

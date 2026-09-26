@@ -18,6 +18,10 @@ A MatrixEntry object.
 }
 \description{
 Filter rows or columns of a MatrixEntry using dplyr syntax.
+Dimension auto-detection uses variable NAMES in the expression, so
+expressions without detectable variable names (e.g. tidy-select helpers
+such as all_of() or where(), or positional selection) cannot be
+auto-detected — pass \code{.dims} explicitly in those cases.
 }
 \details{
 Filter rows or columns of a MatrixEntry using dplyr syntax
