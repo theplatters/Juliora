@@ -4,7 +4,13 @@
 \alias{group_by.MatrixEntry}
 \title{Group MatrixEntry}
 \usage{
-\method{group_by}{MatrixEntry}(.data, ..., .add = FALSE, .drop = dplyr::group_by_drop_default(.data))
+\method{group_by}{MatrixEntry}(
+  .data,
+  ...,
+  .add = FALSE,
+  .drop = dplyr::group_by_drop_default(.data),
+  .dims = NULL
+)
 }
 \arguments{
 \item{.data}{A MatrixEntry object.}
@@ -14,6 +20,8 @@
 \item{.add}{Unused.}
 
 \item{.drop}{Unused.}
+
+\item{.dims}{An optional integer: 1 for row_indices, 2 for col_indices. If NULL (default), auto-detected from variable names.}
 }
 \value{
 A GroupedMatrixEntry object.

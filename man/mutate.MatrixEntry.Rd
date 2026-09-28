@@ -4,7 +4,7 @@
 \alias{mutate.MatrixEntry}
 \title{Mutate MatrixEntry metadata columns}
 \usage{
-\method{mutate}{MatrixEntry}(.data, ..., .dims = 1)
+\method{mutate}{MatrixEntry}(.data, ..., .dims = NULL)
 }
 \arguments{
 \item{.data}{A MatrixEntry object.}

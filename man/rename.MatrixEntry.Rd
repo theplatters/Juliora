@@ -4,7 +4,7 @@
 \alias{rename.MatrixEntry}
 \title{Rename MatrixEntry metadata columns}
 \usage{
-\method{rename}{MatrixEntry}(.data, ..., .dims = 1)
+\method{rename}{MatrixEntry}(.data, ..., .dims = NULL)
 }
 \arguments{
 \item{.data}{A MatrixEntry object.}

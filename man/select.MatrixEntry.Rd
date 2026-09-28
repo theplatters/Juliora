@@ -4,7 +4,7 @@
 \alias{select.MatrixEntry}
 \title{Select MatrixEntry metadata columns}
 \usage{
-\method{select}{MatrixEntry}(.data, ..., .dims = 1)
+\method{select}{MatrixEntry}(.data, ..., .dims = NULL)
 }
 \arguments{
 \item{.data}{A MatrixEntry object.}

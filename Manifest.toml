@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "3bfb31e0d34ac5d6817ade14371c872466b36a27"
+project_hash = "4c87258d2967ae38d4a6431b140c5026365b0d5d"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1213,7 +1213,7 @@ uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
 
 [[deps.Juliora]]
-deps = ["BenchmarkTools", "CSV", "DataFrames", "LinearAlgebra", "Mmap", "Parsers", "Random", "SparseArrays", "Statistics", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
+deps = ["BenchmarkTools", "CSV", "DataFrames", "JLD2", "LinearAlgebra", "Mmap", "Parsers", "Random", "SparseArrays", "Statistics", "Tables", "Test", "Tidier", "TidierData", "TidierFiles", "XLSX", "ZipArchives"]
 path = "."
 uuid = "b4cbaa25-ff22-403a-b853-176105f9e354"
 version = "0.3.0"

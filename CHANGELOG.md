@@ -5,7 +5,8 @@ All notable changes to Juliora are documented in this file.
 ## [0.3.0] - 2026-09-25
 
 This release introduces graph analysis of MRIO networks: a Graphs.jl
-extension on the Julia side and R bindings for the whole graph API.
+extension on the Julia side and R bindings for the whole graph API, plus
+JLD2-based caching of parsed GLORIA data.
 
 ### Added
 
@@ -39,6 +40,13 @@ extension on the Julia side and R bindings for the whole graph API.
   `CommunityResult` S3 classes and testthat coverage.
 - Aggregation and helper utilities: `aggregate`/`groupby` of MRIO tables
   by country or sector columns, plus sector/country accessors.
+- `save_gloria_cache()`/`load_gloria_cache()` — JLD2-based caching of
+  parsed GLORIA MRIO data with a versioned, validated cache schema; a
+  cache can be loaded directly via `Gloria(path)` or
+  `Gloria(path, version, year)` when given a `.jld2`/`.jdl2` path.
+- `juliora_reset()` — R helper that clears the cached Julia connection
+  state so the next Juliora call re-runs project discovery and reloads
+  the Julia packages (optionally stopping the Julia server).
 
 ### Notes
 
